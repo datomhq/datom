@@ -1,0 +1,9 @@
+services:
+  db:
+    image: pgvector/pgvector:pg18-trixie
+    ports:
+      - "54325:5432"
+    environment:
+      POSTGRES_USER: datom
+      POSTGRES_PASSWORD: datom
+      POSTGRES_DB: datom
