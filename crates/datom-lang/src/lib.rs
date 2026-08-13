@@ -20,7 +20,7 @@ pub(crate) enum Primitive {
 }
 
 /// The map of fields and their types for a datom sum type.
-pub(crate) type Fields = HashMap<String, Box<Type>>;
+pub(crate) type Fields = HashMap<String, Type>;
 
 /// A sum type within the datom type system.
 #[derive(Debug, Clone)]
