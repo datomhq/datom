@@ -28,6 +28,7 @@ pub(crate) enum TypeStatement {
     Single(TypeConstructor),
     // variadic carries both the name of the type, plus 1+ named variants
     Variadic((Token, Vec<TypeConstructor>)),
+    InlineVariadic((Token, Vec<TypeName>)),
 }
 
 pub(crate) type TypeFields = Vec<TypeField>;
@@ -35,8 +36,10 @@ pub(crate) type TypeFields = Vec<TypeField>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct TypeField {
     name: Token,
-    ty: Token,
+    ty: TypeName,
 }
+
+pub(crate) type TypeName = Token;
 
 pub(crate) fn parse(
     source: &str,
@@ -133,6 +136,17 @@ where
             let _right_curly = self.expect(TokenKind::RightCurly)?;
 
             Ok(TypeStatement::Variadic((ident, constructors)))
+        } else if self.is_next(TokenKind::Equals) {
+            let _equals = self.advance_unchecked()?;
+            let mut tys = vec![self.type_name()?];
+
+            while self.is_next(TokenKind::Bar) {
+                let _bar = self.advance_unchecked();
+                tys.push(self.type_name()?);
+            }
+
+            let _semi = self.expect(TokenKind::Semicolon)?;
+            Ok(TypeStatement::InlineVariadic((ident, tys)))
         } else {
             let actual = match self.tokens.next() {
                 Some(token) => match token {
@@ -147,6 +161,22 @@ where
                     .into(),
             )
         }
+    }
+
+    fn type_name(&mut self) -> Result<TypeName, CompileError> {
+        self.expect_any(&[
+            // user-named type
+            TokenKind::Identifier,
+            // TODO: should the Token encode with this much specificity? might be too clunky to work with
+            // primitives
+            TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::F32)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::F64)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::I32)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
+        ])
     }
 
     fn type_constructor(&mut self) -> Result<TypeConstructor, CompileError> {
@@ -267,8 +297,10 @@ mod tests {
         TypeStatement,
         SingleTypeStatement,
         VariadicTypeStatement,
+        InlineVariadicTypeStatement,
         TypeConstructor,
         TypeField,
+        TypeName,
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -337,6 +369,19 @@ mod tests {
                                 for field in ctor.fields {
                                     out.push(field.into_node(source));
                                 }
+                            }
+                        }
+                        TypeStatement::InlineVariadic((name, tys)) => {
+                            out.push(Node {
+                                kind: NodeKind::InlineVariadicTypeStatement,
+                                lexeme: String::from(name.lexeme(source)),
+                            });
+
+                            for ty in tys {
+                                out.push(Node {
+                                    kind: NodeKind::TypeName,
+                                    lexeme: String::from(ty.lexeme(source)),
+                                })
                             }
                         }
                     }
@@ -455,6 +500,40 @@ mod tests {
                 Node {
                     kind: NodeKind::TypeField,
                     lexeme: String::from("id: u32"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn inline_variadic_type() {
+        let source = "type Id = string | u32;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::TypeStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::InlineVariadicTypeStatement,
+                    lexeme: String::from("Id"),
+                },
+                Node {
+                    kind: NodeKind::TypeName,
+                    lexeme: String::from("string"),
+                },
+                Node {
+                    kind: NodeKind::TypeName,
+                    lexeme: String::from("u32"),
                 },
             ],
         );

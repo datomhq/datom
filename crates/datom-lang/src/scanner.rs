@@ -8,6 +8,9 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokenKind {
+    Equals,
+    Bar,
+    Semicolon,
     LeftParen,
     RightParen,
     LeftCurly,
@@ -22,6 +25,9 @@ pub(crate) enum TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let repr = match self {
+            TokenKind::Equals => "=",
+            TokenKind::Bar => "|",
+            TokenKind::Semicolon => ";",
             TokenKind::LeftParen => "(",
             TokenKind::RightParen => ")",
             TokenKind::LeftCurly => "{",
@@ -172,6 +178,9 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
             ScannerState::Start | ScannerState::Scanning => {
                 while let Some(char) = self.advance() {
                     let token = match char {
+                        '=' => Token::new(TokenKind::Equals, self.offset, self.offset + 1),
+                        '|' => Token::new(TokenKind::Bar, self.offset, self.offset + 1),
+                        ';' => Token::new(TokenKind::Semicolon, self.offset, self.offset + 1),
                         '(' => Token::new(TokenKind::LeftParen, self.offset, self.offset + 1),
                         ')' => Token::new(TokenKind::RightParen, self.offset, self.offset + 1),
                         '{' => Token::new(TokenKind::LeftCurly, self.offset, self.offset + 1),
@@ -253,7 +262,7 @@ mod tests {
 
     #[test]
     fn punctuation() {
-        let source = "(){}:,";
+        let source = "(){}:,|=;";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -266,6 +275,9 @@ mod tests {
                 (TokenKind::RightCurly, "}"),
                 (TokenKind::Colon, ":"),
                 (TokenKind::Comma, ","),
+                (TokenKind::Bar, "|"),
+                (TokenKind::Equals, "="),
+                (TokenKind::Semicolon, ";"),
                 (TokenKind::Eof, ""),
             ],
         );
