@@ -34,18 +34,8 @@ impl Display for TokenKind {
             TokenKind::RightCurly => "}",
             TokenKind::Comma => ",",
             TokenKind::Colon => ":",
-            TokenKind::Keyword(keyword) => match keyword {
-                Keyword::Type => "type",
-                Keyword::Primitive(primitive) => match primitive {
-                    Primitive::U32 => "u32",
-                    Primitive::I32 => "i32",
-                    Primitive::F32 => "f32",
-                    Primitive::F64 => "f64",
-                    Primitive::String => "string",
-                    Primitive::Bool => "bool",
-                    Primitive::DateTime => "datetime",
-                },
-            },
+            TokenKind::Keyword(Keyword::Type) => "type",
+            TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "{primitive}"),
             TokenKind::Identifier => "an identifier",
             TokenKind::Eof => "<EOF>",
         };
