@@ -29,11 +29,19 @@ pub(crate) enum Sum {
     Single(Fields),
     /// A variadic sum type has multiple variants, each with a name and different fields.
     Variadic(Vec<(String, Fields)>),
+    /// An inline variadic sum has type has multiple variants, each its own field.
+    InlineVariadic(Vec<Type>),
 }
 
 /// A type within the datom type system.
 #[derive(Debug, Clone)]
-pub(crate) enum Type {
+pub(crate) struct Type {
+    pub name: String,
+    pub details: TypeDetails,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TypeDetails {
     Primitive(Primitive),
     Sum(Sum),
 }
