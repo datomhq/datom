@@ -32,6 +32,8 @@ type Product {
     bay: u32,
   )
 }
+
+type Id = string | number;
 ```
 
 Some notes on the above:
