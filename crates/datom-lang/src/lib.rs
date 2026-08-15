@@ -115,8 +115,9 @@ impl Display for Sum {
                 f.write_str(" }")
             }
 
-            // e.g., `Employee | Robot`
+            // e.g., ` = Person | Robot`
             Self::InlineVariadic(tys) => {
+                f.write_str(" = ")?;
                 for (i, ty) in tys.iter().enumerate() {
                     if i > 0 {
                         f.write_str(" | ")?;
@@ -159,6 +160,8 @@ pub fn compile(source: &str) -> Result<parser::Program, error::CompileError> {
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
 
     /// Build a [`Fields`] map from `(name, type)` pairs.
@@ -257,6 +260,54 @@ mod tests {
             format!("{major}\n{student}"),
             "type Major { Undeclared(), Declared(name: string) }\ntype Student(major: Major)"
         );
+    }
+
+    #[test]
+    fn an_inline_variadic_prints_references() {
+        let person = Type {
+            name: String::from("Person"),
+            details: TypeDetails::Sum(Sum::Single(fields([(
+                "name",
+                Type::primitive(Primitive::String),
+            )]))),
+        };
+
+        let robot = Type {
+            name: String::from("Robot"),
+            details: TypeDetails::Sum(Sum::Single(fields([(
+                "id",
+                Type::primitive(Primitive::U32),
+            )]))),
+        };
+
+        let employee = Type {
+            name: String::from("Employee"),
+            details: TypeDetails::Sum(Sum::InlineVariadic(vec![person, robot])),
+        };
+
+        assert_eq!(employee.to_string(), "type Employee = Person | Robot");
+    }
+
+    #[test]
+    fn an_inline_variadic_may_mix_primitives_and_singles() {
+        let badge = Type {
+            name: String::from("Badge"),
+            details: TypeDetails::Sum(Sum::Single(fields([(
+                "serial",
+                Type::primitive(Primitive::U32),
+            )]))),
+        };
+
+        let id = Type {
+            name: String::from("Id"),
+            details: TypeDetails::Sum(Sum::InlineVariadic(vec![
+                Type::primitive(Primitive::String),
+                Type::primitive(Primitive::U32),
+                badge,
+            ])),
+        };
+
+        assert_eq!(id.to_string(), "type Id = string | u32 | Badge");
     }
 
     #[test]
