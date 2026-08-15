@@ -49,22 +49,33 @@ pub(crate) enum Sum {
     /// A variadic sum type has multiple variants, each with a name and different fields.
     Variadic(Vec<(String, Fields)>),
     /// An inline variadic sum has type has multiple variants, each its own field.
-    InlineVariadic(Vec<Type>), // __ = type.name;
+    InlineVariadic(Vec<Type>),
 }
 
 /// A type within the datom type system.
 #[derive(Debug, Clone)]
 pub(crate) struct Type {
-    // type <> ()
     pub name: String,
     pub details: TypeDetails,
 }
 
+impl Type {
+    /// A primitive type, named for the primitive itself.
+    pub(crate) fn primitive(primitive: Primitive) -> Self {
+        Self {
+            name: primitive.to_string(),
+            details: TypeDetails::Primitive(primitive),
+        }
+    }
+}
+
+/// Prints a type as the declaration that introduces it — `type Person(name: string)`.
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "type {}", self.name)?;
-
-        write!(f, "{}", self.details)
+        match &self.details {
+            TypeDetails::Primitive(_) => f.write_str(&self.name),
+            TypeDetails::Sum(sum) => write!(f, "type {}{sum}", self.name),
+        }
     }
 }
 
@@ -93,7 +104,7 @@ impl Display for Sum {
 
             // e.g., `{ Employee(name: string), Robot(id: u32) }`
             Self::Variadic(variants) => {
-                f.write_str("{ ")?;
+                f.write_str(" { ")?;
                 for (i, (name, fields)) in variants.iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
@@ -102,6 +113,17 @@ impl Display for Sum {
                     write_fields(f, fields)?;
                 }
                 f.write_str(" }")
+            }
+
+            // e.g., `Employee | Robot`
+            Self::InlineVariadic(tys) => {
+                for (i, ty) in tys.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" | ")?;
+                    }
+                    f.write_str(&ty.name)?;
+                }
+                Ok(())
             }
         }
     }
@@ -117,7 +139,7 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
         if i > 0 {
             f.write_str(", ")?;
         }
-        write!(f, "{name}: {}", fields[name])?;
+        write!(f, "{name}: {}", fields[name].name)?;
     }
     f.write_str(")")
 }
@@ -160,20 +182,8 @@ mod tests {
         let cell = Type {
             name: String::from("Cell"),
             details: TypeDetails::Sum(Sum::Single(fields([
-                (
-                    "nucleus",
-                    Type {
-                        name: String::from("bool"),
-                        details: TypeDetails::Primitive(Primitive::Bool),
-                    },
-                ),
-                (
-                    "wall",
-                    Type {
-                        name: String::from("bool"),
-                        details: TypeDetails::Primitive(Primitive::Bool),
-                    },
-                ),
+                ("nucleus", Type::primitive(Primitive::Bool)),
+                ("wall", Type::primitive(Primitive::Bool)),
             ]))),
         };
         assert_eq!(cell.to_string(), "type Cell(nucleus: bool, wall: bool)");
@@ -186,30 +196,18 @@ mod tests {
             details: TypeDetails::Sum(Sum::Variadic(vec![
                 (
                     String::from("Student"),
-                    fields([(
-                        "id",
-                        Type {
-                            name: String::from("u32"),
-                            details: TypeDetails::Primitive(Primitive::U32),
-                        },
-                    )]),
+                    fields([("id", Type::primitive(Primitive::U32))]),
                 ),
                 (
                     String::from("Professor"),
-                    fields([(
-                        "tenured",
-                        Type {
-                            name: String::from("bool"),
-                            details: TypeDetails::Primitive(Primitive::Bool),
-                        },
-                    )]),
+                    fields([("tenured", Type::primitive(Primitive::Bool))]),
                 ),
             ])),
         };
 
         assert_eq!(
             person.to_string(),
-            "type Person = { Student(id: u32), Professor(tenured: bool) }"
+            "type Person { Student(id: u32), Professor(tenured: bool) }"
         );
     }
 
@@ -219,31 +217,21 @@ mod tests {
             name: String::from("Address"),
             details: TypeDetails::Sum(Sum::Single(fields([(
                 "city",
-                Type {
-                    name: String::from("string"),
-                    details: TypeDetails::Primitive(Primitive::String),
-                },
+                Type::primitive(Primitive::String),
             )]))),
         };
 
         let person = Type {
             name: String::from("Person"),
             details: TypeDetails::Sum(Sum::Single(fields([
-                ("home", address),
-                (
-                    "id",
-                    Type {
-                        name: String::from("id"),
-                        details: TypeDetails::Primitive(Primitive::U32),
-                    },
-                ),
+                ("home", address.clone()),
+                ("id", Type::primitive(Primitive::U32)),
             ]))),
         };
 
         assert_eq!(
-            person.to_string(),
-            r#"type Address(city: string)
-            type Person(home: Address, id: u32)"#
+            format!("{address}\n{person}"),
+            "type Address(city: string)\ntype Person(home: Address, id: u32)"
         );
     }
 
@@ -255,27 +243,19 @@ mod tests {
                 (String::from("Undeclared"), fields([])),
                 (
                     String::from("Declared"),
-                    fields([(
-                        "name",
-                        Type {
-                            name: String::from("string"),
-                            details: TypeDetails::Primitive(Primitive::String),
-                        },
-                    )]),
+                    fields([("name", Type::primitive(Primitive::String))]),
                 ),
             ])),
         };
 
         let student = Type {
             name: String::from("Student"),
-            details: TypeDetails::Sum(Sum::Single(fields([("major", major)]))),
+            details: TypeDetails::Sum(Sum::Single(fields([("major", major.clone())]))),
         };
 
         assert_eq!(
-            student.to_string(),
-            // TODO: add param
-            r#"type Major { Undeclared(), Declared(name: string)}
-            type Student(major: Major)"#
+            format!("{major}\n{student}"),
+            "type Major { Undeclared(), Declared(name: string) }\ntype Student(major: Major)"
         );
     }
 
@@ -284,30 +264,15 @@ mod tests {
         let ty = Type {
             name: String::from("Zoo"),
             details: TypeDetails::Sum(Sum::Single(fields([
-                (
-                    "zebra",
-                    Type {
-                        name: String::from("bool"),
-                        details: TypeDetails::Primitive(Primitive::Bool),
-                    },
-                ),
-                (
-                    "apple",
-                    Type {
-                        name: String::from("bool"),
-                        details: TypeDetails::Primitive(Primitive::Bool),
-                    },
-                ),
-                (
-                    "middle",
-                    Type {
-                        name: String::from("f32"),
-                        details: TypeDetails::Primitive(Primitive::F32),
-                    },
-                ),
+                ("zebra", Type::primitive(Primitive::Bool)),
+                ("apple", Type::primitive(Primitive::Bool)),
+                ("middle", Type::primitive(Primitive::F32)),
             ]))),
         };
 
-        assert_eq!(ty.to_string(), "(apple: bool, middle: f32, zebra: bool)");
+        assert_eq!(
+            ty.to_string(),
+            "type Zoo(apple: bool, middle: f32, zebra: bool)"
+        );
     }
 }
