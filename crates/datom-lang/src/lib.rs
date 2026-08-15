@@ -124,6 +124,7 @@ impl Display for Sum {
                     }
                     f.write_str(&ty.name)?;
                 }
+                f.write_str(";")?;
                 Ok(())
             }
         }
@@ -285,7 +286,7 @@ mod tests {
             details: TypeDetails::Sum(Sum::InlineVariadic(vec![person, robot])),
         };
 
-        assert_eq!(employee.to_string(), "type Employee = Person | Robot");
+        assert_eq!(employee.to_string(), "type Employee = Person | Robot;");
     }
 
     #[test]
@@ -307,7 +308,7 @@ mod tests {
             ])),
         };
 
-        assert_eq!(id.to_string(), "type Id = string | u32 | Badge");
+        assert_eq!(id.to_string(), "type Id = string | u32 | Badge;");
     }
 
     #[test]
