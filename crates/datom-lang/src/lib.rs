@@ -67,6 +67,28 @@ impl Type {
             details: TypeDetails::Primitive(primitive),
         }
     }
+
+    /// A single sum type.
+    pub(crate) fn single(name: &str, fields: Fields) -> Self {
+        Self::of(name, Sum::Single(fields))
+    }
+
+    /// A variadic sum type — several named variants, each with its own fields.
+    pub(crate) fn variadic(name: &str, variants: Vec<(String, Fields)>) -> Self {
+        Self::of(name, Sum::Variadic(variants))
+    }
+
+    /// An inline variadic sum type — several variants, each an existing type.
+    pub(crate) fn inline_variadic(name: &str, variants: Vec<Type>) -> Self {
+        Self::of(name, Sum::InlineVariadic(variants))
+    }
+
+    fn of(name: &str, sum: Sum) -> Self {
+        Self {
+            name: name.to_string(),
+            details: TypeDetails::Sum(sum),
+        }
+    }
 }
 
 /// Prints a type as the declaration that introduces it — `type Person(name: string)`.
@@ -183,21 +205,21 @@ mod tests {
 
     #[test]
     fn a_single_sum_prints_its_fields() {
-        let cell = Type {
-            name: String::from("Cell"),
-            details: TypeDetails::Sum(Sum::Single(fields([
+        let cell = Type::single(
+            "Cell",
+            fields([
                 ("nucleus", Type::primitive(Primitive::Bool)),
                 ("wall", Type::primitive(Primitive::Bool)),
-            ]))),
-        };
+            ]),
+        );
         assert_eq!(cell.to_string(), "type Cell(nucleus: bool, wall: bool)");
     }
 
     #[test]
     fn a_variadic_sum_prints_every_variant() {
-        let person = Type {
-            name: String::from("Person"),
-            details: TypeDetails::Sum(Sum::Variadic(vec![
+        let person = Type::variadic(
+            "Person",
+            vec![
                 (
                     String::from("Student"),
                     fields([("id", Type::primitive(Primitive::U32))]),
@@ -206,8 +228,8 @@ mod tests {
                     String::from("Professor"),
                     fields([("tenured", Type::primitive(Primitive::Bool))]),
                 ),
-            ])),
-        };
+            ],
+        );
 
         assert_eq!(
             person.to_string(),
@@ -217,21 +239,18 @@ mod tests {
 
     #[test]
     fn nested_sums_recurse_down_to_their_primitives() {
-        let address = Type {
-            name: String::from("Address"),
-            details: TypeDetails::Sum(Sum::Single(fields([(
-                "city",
-                Type::primitive(Primitive::String),
-            )]))),
-        };
+        let address = Type::single(
+            "Address",
+            fields([("city", Type::primitive(Primitive::String))]),
+        );
 
-        let person = Type {
-            name: String::from("Person"),
-            details: TypeDetails::Sum(Sum::Single(fields([
+        let person = Type::single(
+            "Person",
+            fields([
                 ("home", address.clone()),
                 ("id", Type::primitive(Primitive::U32)),
-            ]))),
-        };
+            ]),
+        );
 
         assert_eq!(
             format!("{address}\n{person}"),
@@ -241,21 +260,18 @@ mod tests {
 
     #[test]
     fn a_variant_may_nest_a_sum_too() {
-        let major = Type {
-            name: String::from("Major"),
-            details: TypeDetails::Sum(Sum::Variadic(vec![
+        let major = Type::variadic(
+            "Major",
+            vec![
                 (String::from("Undeclared"), fields([])),
                 (
                     String::from("Declared"),
                     fields([("name", Type::primitive(Primitive::String))]),
                 ),
-            ])),
-        };
+            ],
+        );
 
-        let student = Type {
-            name: String::from("Student"),
-            details: TypeDetails::Sum(Sum::Single(fields([("major", major.clone())]))),
-        };
+        let student = Type::single("Student", fields([("major", major.clone())]));
 
         assert_eq!(
             format!("{major}\n{student}"),
@@ -265,62 +281,47 @@ mod tests {
 
     #[test]
     fn an_inline_variadic_prints_references() {
-        let person = Type {
-            name: String::from("Person"),
-            details: TypeDetails::Sum(Sum::Single(fields([(
-                "name",
-                Type::primitive(Primitive::String),
-            )]))),
-        };
+        let person = Type::single(
+            "Person",
+            fields([("name", Type::primitive(Primitive::String))]),
+        );
 
-        let robot = Type {
-            name: String::from("Robot"),
-            details: TypeDetails::Sum(Sum::Single(fields([(
-                "id",
-                Type::primitive(Primitive::U32),
-            )]))),
-        };
+        let robot = Type::single("Robot", fields([("id", Type::primitive(Primitive::U32))]));
 
-        let employee = Type {
-            name: String::from("Employee"),
-            details: TypeDetails::Sum(Sum::InlineVariadic(vec![person, robot])),
-        };
+        let employee = Type::inline_variadic("Employee", vec![person, robot]);
 
         assert_eq!(employee.to_string(), "type Employee = Person | Robot;");
     }
 
     #[test]
     fn an_inline_variadic_may_mix_primitives_and_singles() {
-        let badge = Type {
-            name: String::from("Badge"),
-            details: TypeDetails::Sum(Sum::Single(fields([(
-                "serial",
-                Type::primitive(Primitive::U32),
-            )]))),
-        };
+        let badge = Type::single(
+            "Badge",
+            fields([("serial", Type::primitive(Primitive::U32))]),
+        );
 
-        let id = Type {
-            name: String::from("Id"),
-            details: TypeDetails::Sum(Sum::InlineVariadic(vec![
+        let id = Type::inline_variadic(
+            "Id",
+            vec![
                 Type::primitive(Primitive::String),
                 Type::primitive(Primitive::U32),
                 badge,
-            ])),
-        };
+            ],
+        );
 
         assert_eq!(id.to_string(), "type Id = string | u32 | Badge;");
     }
 
     #[test]
     fn fields_print_in_a_stable_order() {
-        let ty = Type {
-            name: String::from("Zoo"),
-            details: TypeDetails::Sum(Sum::Single(fields([
+        let ty = Type::single(
+            "Zoo",
+            fields([
                 ("zebra", Type::primitive(Primitive::Bool)),
                 ("apple", Type::primitive(Primitive::Bool)),
                 ("middle", Type::primitive(Primitive::F32)),
-            ]))),
-        };
+            ]),
+        );
 
         assert_eq!(
             ty.to_string(),
