@@ -5,12 +5,15 @@ statement |- typeStatement
 
 typeStatement |- "type" typeConstructor
               | "type" ident "{" typeConstructor ("," typeConstructor)* (",")? "}"
+              | "type" ident "=" typeName ("|" typeName)* ";"
+
+typeName |- ident | primitive
 
 typeConstructor |- ident "(" typeFields ")"
 
 typeFields |- typeField ("," typeField)* (",")?
 
-typeField |- ident ":" primitive
+typeField |- ident ":" typeName
 
 ident |- [a-zA-Z]([a-zA-Z0-9_])*
 
