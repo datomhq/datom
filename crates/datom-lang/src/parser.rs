@@ -302,7 +302,7 @@ mod tests {
         fn into_node(self, source: &'src str) -> Node {
             Node {
                 kind: NodeKind::TypeField,
-                lexeme: format!("{}: {}", self.name.lexeme(source), self.ty.kind),
+                lexeme: format!("{}: {}", self.name.lexeme(source), self.ty.lexeme(source)),
             }
         }
     }
@@ -481,6 +481,39 @@ mod tests {
                 Node {
                     kind: NodeKind::TypeConstructor,
                     lexeme: String::from("Professor"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("id: number"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn a_field_names_the_type_it_references() {
+        let source = "type Person(home: Address, id: number)";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::TypeStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::SingleTypeStatement,
+                    lexeme: String::from("Person"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("home: Address"),
                 },
                 Node {
                     kind: NodeKind::TypeField,

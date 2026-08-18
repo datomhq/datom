@@ -25,17 +25,17 @@ pub(crate) enum TokenKind {
 impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let repr = match self {
-            TokenKind::Equals => "=",
-            TokenKind::Bar => "|",
-            TokenKind::Semicolon => ";",
-            TokenKind::LeftParen => "(",
-            TokenKind::RightParen => ")",
-            TokenKind::LeftCurly => "{",
-            TokenKind::RightCurly => "}",
-            TokenKind::Comma => ",",
-            TokenKind::Colon => ":",
-            TokenKind::Keyword(Keyword::Type) => "type",
-            TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "{primitive}"),
+            TokenKind::Equals => "`=`",
+            TokenKind::Bar => "`|`",
+            TokenKind::Semicolon => "`;`",
+            TokenKind::LeftParen => "`(`",
+            TokenKind::RightParen => "`)`",
+            TokenKind::LeftCurly => "`{`",
+            TokenKind::RightCurly => "`}`",
+            TokenKind::Comma => "`,`",
+            TokenKind::Colon => "`:`",
+            TokenKind::Keyword(Keyword::Type) => "`type`",
+            TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "`{primitive}`"),
             TokenKind::Identifier => "an identifier",
             TokenKind::Eof => "<EOF>",
         };
