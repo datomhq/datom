@@ -13,10 +13,7 @@ pub(crate) mod scanner;
 /// A primitive type within the datom type system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Primitive {
-    U32,
-    I32,
-    F32,
-    F64,
+    Number,
     String,
     Bool,
     DateTime,
@@ -25,10 +22,7 @@ pub(crate) enum Primitive {
 impl Display for Primitive {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let repr = match self {
-            Self::U32 => "u32",
-            Self::I32 => "i32",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
+            Self::Number => "number",
             Self::String => "string",
             Self::Bool => "bool",
             Self::DateTime => "datetime",
@@ -121,10 +115,10 @@ impl Display for TypeDetails {
 impl Display for Sum {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            // e.g., `(id: u32, name: string)`
+            // e.g., `(id: number, name: string)`
             Self::Single(fields) => write_fields(f, fields),
 
-            // e.g., `{ Employee(name: string), Robot(id: u32) }`
+            // e.g., `{ Employee(name: string), Robot(id: number) }`
             Self::Variadic(variants) => {
                 f.write_str(" { ")?;
                 for (i, (name, fields)) in variants.iter().enumerate() {
@@ -222,7 +216,7 @@ mod tests {
             vec![
                 (
                     String::from("Student"),
-                    fields([("id", Type::primitive(Primitive::U32))]),
+                    fields([("id", Type::primitive(Primitive::Number))]),
                 ),
                 (
                     String::from("Professor"),
@@ -233,7 +227,7 @@ mod tests {
 
         assert_eq!(
             person.to_string(),
-            "type Person { Student(id: u32), Professor(tenured: bool) }"
+            "type Person { Student(id: number), Professor(tenured: bool) }"
         );
     }
 
@@ -248,13 +242,13 @@ mod tests {
             "Person",
             fields([
                 ("home", address.clone()),
-                ("id", Type::primitive(Primitive::U32)),
+                ("id", Type::primitive(Primitive::Number)),
             ]),
         );
 
         assert_eq!(
             format!("{address}\n{person}"),
-            "type Address(city: string)\ntype Person(home: Address, id: u32)"
+            "type Address(city: string)\ntype Person(home: Address, id: number)"
         );
     }
 
@@ -286,7 +280,10 @@ mod tests {
             fields([("name", Type::primitive(Primitive::String))]),
         );
 
-        let robot = Type::single("Robot", fields([("id", Type::primitive(Primitive::U32))]));
+        let robot = Type::single(
+            "Robot",
+            fields([("id", Type::primitive(Primitive::Number))]),
+        );
 
         let employee = Type::inline_variadic("Employee", vec![person, robot]);
 
@@ -297,19 +294,19 @@ mod tests {
     fn an_inline_variadic_may_mix_primitives_and_singles() {
         let badge = Type::single(
             "Badge",
-            fields([("serial", Type::primitive(Primitive::U32))]),
+            fields([("serial", Type::primitive(Primitive::Number))]),
         );
 
         let id = Type::inline_variadic(
             "Id",
             vec![
                 Type::primitive(Primitive::String),
-                Type::primitive(Primitive::U32),
+                Type::primitive(Primitive::Number),
                 badge,
             ],
         );
 
-        assert_eq!(id.to_string(), "type Id = string | u32 | Badge;");
+        assert_eq!(id.to_string(), "type Id = string | number | Badge;");
     }
 
     #[test]
@@ -319,13 +316,13 @@ mod tests {
             fields([
                 ("zebra", Type::primitive(Primitive::Bool)),
                 ("apple", Type::primitive(Primitive::Bool)),
-                ("middle", Type::primitive(Primitive::F32)),
+                ("middle", Type::primitive(Primitive::Number)),
             ]),
         );
 
         assert_eq!(
             ty.to_string(),
-            "type Zoo(apple: bool, middle: f32, zebra: bool)"
+            "type Zoo(apple: bool, middle: number, zebra: bool)"
         );
     }
 }

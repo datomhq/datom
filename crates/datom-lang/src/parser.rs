@@ -171,11 +171,8 @@ where
             // primitives
             TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
             TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::F32)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::F64)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::I32)),
+            TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
             TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
         ])
     }
 
@@ -210,19 +207,7 @@ where
     fn type_field(&mut self) -> Result<TypeField, CompileError> {
         let name = self.expect(TokenKind::Identifier)?;
         let _colon = self.expect(TokenKind::Colon)?;
-        let ty = self.expect_any(&[
-            // user-named type
-            TokenKind::Identifier,
-            // TODO: should the Token encode with this much specificity? might be too clunky to work with
-            // primitives
-            TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::F32)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::F64)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::I32)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
-        ])?;
+        let ty = self.type_name()?;
 
         Ok(TypeField { name, ty })
     }
@@ -404,7 +389,7 @@ mod tests {
 
     #[test]
     fn single_type() {
-        let source = "type Person(id: u32)";
+        let source = "type Person(id: number)";
 
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
@@ -425,7 +410,7 @@ mod tests {
                 },
                 Node {
                     kind: NodeKind::TypeField,
-                    lexeme: String::from("id: u32"),
+                    lexeme: String::from("id: number"),
                 },
             ],
         );
@@ -433,7 +418,7 @@ mod tests {
 
     #[test]
     fn single_type_trailing_field_comma() {
-        let source = "type Person(id: u32,)";
+        let source = "type Person(id: number,)";
 
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
@@ -454,7 +439,7 @@ mod tests {
                 },
                 Node {
                     kind: NodeKind::TypeField,
-                    lexeme: String::from("id: u32"),
+                    lexeme: String::from("id: number"),
                 },
             ],
         );
@@ -462,7 +447,7 @@ mod tests {
 
     #[test]
     fn variadic_type() {
-        let source = "type Person { Student(id: u32, major: string), Professor(id: u32), }";
+        let source = "type Person { Student(id: number, major: string), Professor(id: number), }";
 
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
@@ -487,7 +472,7 @@ mod tests {
                 },
                 Node {
                     kind: NodeKind::TypeField,
-                    lexeme: String::from("id: u32"),
+                    lexeme: String::from("id: number"),
                 },
                 Node {
                     kind: NodeKind::TypeField,
@@ -499,7 +484,7 @@ mod tests {
                 },
                 Node {
                     kind: NodeKind::TypeField,
-                    lexeme: String::from("id: u32"),
+                    lexeme: String::from("id: number"),
                 },
             ],
         );
@@ -507,7 +492,7 @@ mod tests {
 
     #[test]
     fn inline_variadic_type() {
-        let source = "type Id = string | u32;";
+        let source = "type Id = string | number;";
 
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
@@ -533,7 +518,7 @@ mod tests {
                 },
                 Node {
                     kind: NodeKind::TypeName,
-                    lexeme: String::from("u32"),
+                    lexeme: String::from("number"),
                 },
             ],
         );

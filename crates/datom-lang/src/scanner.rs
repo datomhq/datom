@@ -143,10 +143,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
         let kind = match ident {
             "type" => TokenKind::Keyword(Keyword::Type),
             "string" => TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-            "u32" => TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
-            "i32" => TokenKind::Keyword(Keyword::Primitive(Primitive::I32)),
-            "f32" => TokenKind::Keyword(Keyword::Primitive(Primitive::F32)),
-            "f64" => TokenKind::Keyword(Keyword::Primitive(Primitive::F64)),
+            "number" => TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
             "bool" => TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
             "datetime" => TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
             _ => TokenKind::Identifier,
@@ -275,7 +272,7 @@ mod tests {
 
     #[test]
     fn keywords() {
-        let source = "type string u32 i32 f32 f64 bool datetime";
+        let source = "type string number bool datetime";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -288,20 +285,8 @@ mod tests {
                     "string",
                 ),
                 (
-                    TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
-                    "u32",
-                ),
-                (
-                    TokenKind::Keyword(Keyword::Primitive(Primitive::I32)),
-                    "i32",
-                ),
-                (
-                    TokenKind::Keyword(Keyword::Primitive(Primitive::F32)),
-                    "f32",
-                ),
-                (
-                    TokenKind::Keyword(Keyword::Primitive(Primitive::F64)),
-                    "f64",
+                    TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+                    "number",
                 ),
                 (
                     TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
@@ -343,7 +328,7 @@ mod tests {
     #[test]
     fn full_multiline_type() {
         let source = r#"type Person(
-            id: u32,
+            id: number,
             name: string,
         )"#;
         let diagnostics = Diagnostics::new();
@@ -358,8 +343,8 @@ mod tests {
                 (TokenKind::Identifier, "id"),
                 (TokenKind::Colon, ":"),
                 (
-                    TokenKind::Keyword(Keyword::Primitive(Primitive::U32)),
-                    "u32",
+                    TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+                    "number",
                 ),
                 (TokenKind::Comma, ","),
                 (TokenKind::Identifier, "name"),
