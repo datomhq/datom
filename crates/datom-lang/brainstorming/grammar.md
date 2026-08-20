@@ -17,7 +17,7 @@ typeField |- ident ":" typeName
 
 ident |- [a-zA-Z]([a-zA-Z0-9_])*
 
-primitive |- "string" | "u32" | "i32" | "bool" | "datetime" | "f32" | "f64"
+primitive |- "number" | "string" | "bool" | "datetime"
 ```
 
 legend:

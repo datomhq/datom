@@ -10,7 +10,7 @@ Pipelines should be cleanly represented as a sequence of pure transformations, w
 ```datom
 // A table of orders
 type Order (
-  id: u32,
+  id: number,
   date: datetime,
 )
 
@@ -28,8 +28,8 @@ type Product {
   InStore(
     sku: string,
     name: string,
-    aisle: u32,
-    bay: u32,
+    aisle: number,
+    bay: number,
   )
 }
 
