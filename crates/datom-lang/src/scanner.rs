@@ -15,6 +15,8 @@ pub(crate) enum TokenKind {
     RightParen,
     LeftCurly,
     RightCurly,
+    LeftAngle,
+    RightAngle,
     Comma,
     Colon,
     Keyword(Keyword),
@@ -32,10 +34,15 @@ impl Display for TokenKind {
             TokenKind::RightParen => "`)`",
             TokenKind::LeftCurly => "`{`",
             TokenKind::RightCurly => "`}`",
+            TokenKind::LeftAngle => "`<`",
+            TokenKind::RightAngle => "`>`",
             TokenKind::Comma => "`,`",
             TokenKind::Colon => "`:`",
             TokenKind::Keyword(Keyword::Type) => "`type`",
             TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "`{primitive}`"),
+            TokenKind::Keyword(Keyword::Collection(collection)) => {
+                return write!(f, "`{collection}`");
+            }
             TokenKind::Identifier => "an identifier",
             TokenKind::Eof => "<EOF>",
         };
@@ -48,6 +55,24 @@ impl Display for TokenKind {
 pub(crate) enum Keyword {
     Type,
     Primitive(Primitive),
+    Collection(Collection),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Collection {
+    List,
+    Map,
+    Set,
+}
+
+impl Display for Collection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Collection::List => write!(f, "list"),
+            Collection::Map => write!(f, "map"),
+            Collection::Set => write!(f, "set"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +171,9 @@ impl<'s, 'd> Scanner<'s, 'd> {
             "number" => TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
             "bool" => TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
             "datetime" => TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
+            "list" => TokenKind::Keyword(Keyword::Collection(Collection::List)),
+            "map" => TokenKind::Keyword(Keyword::Collection(Collection::Map)),
+            "set" => TokenKind::Keyword(Keyword::Collection(Collection::Set)),
             _ => TokenKind::Identifier,
         };
 
@@ -172,6 +200,8 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         ')' => Token::new(TokenKind::RightParen, self.offset, self.offset + 1),
                         '{' => Token::new(TokenKind::LeftCurly, self.offset, self.offset + 1),
                         '}' => Token::new(TokenKind::RightCurly, self.offset, self.offset + 1),
+                        '<' => Token::new(TokenKind::LeftAngle, self.offset, self.offset + 1),
+                        '>' => Token::new(TokenKind::RightAngle, self.offset, self.offset + 1),
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
@@ -249,7 +279,7 @@ mod tests {
 
     #[test]
     fn punctuation() {
-        let source = "(){}:,|=;";
+        let source = "(){}:,|=;<>";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -265,6 +295,8 @@ mod tests {
                 (TokenKind::Bar, "|"),
                 (TokenKind::Equals, "="),
                 (TokenKind::Semicolon, ";"),
+                (TokenKind::LeftAngle, "<"),
+                (TokenKind::RightAngle, ">"),
                 (TokenKind::Eof, ""),
             ],
         );
@@ -272,7 +304,7 @@ mod tests {
 
     #[test]
     fn keywords() {
-        let source = "type string number bool datetime";
+        let source = "type string number bool datetime list map set";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -295,6 +327,18 @@ mod tests {
                 (
                     TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
                     "datetime",
+                ),
+                (
+                    TokenKind::Keyword(Keyword::Collection(Collection::List)),
+                    "list",
+                ),
+                (
+                    TokenKind::Keyword(Keyword::Collection(Collection::Map)),
+                    "map",
+                ),
+                (
+                    TokenKind::Keyword(Keyword::Collection(Collection::Set)),
+                    "set",
                 ),
                 (TokenKind::Eof, ""),
             ],
