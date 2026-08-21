@@ -1,7 +1,7 @@
 use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
 
 use crate::{
-    Primitive,
+    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ScanError},
 };
@@ -56,23 +56,6 @@ pub(crate) enum Keyword {
     Type,
     Primitive(Primitive),
     Collection(Collection),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Collection {
-    List,
-    Map,
-    Set,
-}
-
-impl Display for Collection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Collection::List => write!(f, "list"),
-            Collection::Map => write!(f, "map"),
-            Collection::Set => write!(f, "set"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
