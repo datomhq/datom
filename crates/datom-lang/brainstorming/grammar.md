@@ -7,7 +7,7 @@ typeStatement |- "type" typeConstructor
               | "type" ident "{" typeConstructor ("," typeConstructor)* (",")? "}"
               | "type" ident "=" typeName ("|" typeName)* ";"
 
-typeName |- ident | primitive
+typeName |- ident | primitive | collection
 
 typeConstructor |- ident "(" typeFields ")"
 
@@ -18,6 +18,10 @@ typeField |- ident ":" typeName
 ident |- [a-zA-Z]([a-zA-Z0-9_])*
 
 primitive |- "number" | "string" | "bool" | "datetime"
+
+collection |- "list" generic | "map" generic | "set" generic
+
+generic |- "<" typeName ">"
 ```
 
 legend:

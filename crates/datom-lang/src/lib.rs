@@ -32,6 +32,26 @@ impl Display for Primitive {
     }
 }
 
+/// A collection type within the datom type system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Collection {
+    List,
+    Map,
+    Set,
+}
+
+impl Display for Collection {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let repr = match self {
+            Self::List => "list",
+            Self::Map => "map",
+            Self::Set => "set",
+        };
+
+        write!(f, "{repr}")
+    }
+}
+
 /// The map of fields and their types for a datom sum type.
 pub(crate) type Fields = HashMap<String, Type>;
 
@@ -44,6 +64,18 @@ pub(crate) enum Sum {
     Variadic(Vec<(String, Fields)>),
     /// An inline variadic sum has type has multiple variants, each its own field.
     InlineVariadic(Vec<Type>),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CollectionDetails {
+    kind: Collection,
+    generic: Box<Type>,
+}
+
+impl Display for CollectionDetails {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}<{}>", self.kind, self.generic)
+    }
 }
 
 /// A type within the datom type system.
@@ -77,6 +109,18 @@ impl Type {
         Self::of(name, Sum::InlineVariadic(variants))
     }
 
+    pub(crate) fn collection(kind: Collection, generic: Type) -> Self {
+        let details = CollectionDetails {
+            kind,
+            generic: Box::new(generic),
+        };
+
+        Self {
+            name: details.to_string(),
+            details: TypeDetails::Collection(details),
+        }
+    }
+
     fn of(name: &str, sum: Sum) -> Self {
         Self {
             name: name.to_string(),
@@ -91,6 +135,7 @@ impl Display for Type {
         match &self.details {
             TypeDetails::Primitive(_) => f.write_str(&self.name),
             TypeDetails::Sum(sum) => write!(f, "type {}{sum}", self.name),
+            TypeDetails::Collection(collection) => write!(f, "{collection}"),
         }
     }
 }
@@ -99,6 +144,7 @@ impl Display for Type {
 pub(crate) enum TypeDetails {
     Primitive(Primitive),
     Sum(Sum),
+    Collection(CollectionDetails),
 }
 
 impl Display for TypeDetails {
@@ -108,6 +154,7 @@ impl Display for TypeDetails {
         match self {
             Self::Primitive(primitive) => write!(f, "{primitive}"),
             Self::Sum(sum) => write!(f, "{sum}"),
+            Self::Collection(collection) => write!(f, "{collection}"),
         }
     }
 }
@@ -324,5 +371,20 @@ mod tests {
             ty.to_string(),
             "type Zoo(apple: bool, middle: number, zebra: bool)"
         );
+    }
+
+    #[test]
+    fn collections() {
+        let ty = Type::collection(Collection::List, Type::primitive(Primitive::Number));
+        assert_eq!(ty.to_string(), "list<number>");
+    }
+
+    #[test]
+    fn collections_as_fields() {
+        let collection = Type::collection(Collection::List, Type::primitive(Primitive::Bool));
+
+        let ty = Type::single("Arena", fields([("items", collection)]));
+
+        assert_eq!(ty.to_string(), "type Arena(items: list<bool>)")
     }
 }
