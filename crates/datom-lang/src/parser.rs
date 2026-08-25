@@ -51,6 +51,8 @@ pub(crate) enum TypeName {
     },
 }
 
+pub(crate) type Generic = TypeName;
+
 /// Every token kind that may begin a type name.
 const TYPE_NAME_KINDS: &[TokenKind] = &[
     // user-named type
@@ -203,7 +205,7 @@ where
         }
     }
 
-    fn generic(&mut self) -> Result<TypeName, CompileError> {
+    fn generic(&mut self) -> Result<Generic, CompileError> {
         let _left_angle = self.expect(TokenKind::LeftAngle)?;
         let type_name = self.type_name()?;
         let _right_angle = self.expect(TokenKind::RightAngle)?;
