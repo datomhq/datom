@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn collections_name_sums() {
+    fn collections_print_sums() {
         let address = Type::single(
             "Address",
             fields([("city", Type::primitive(Primitive::String))]),
