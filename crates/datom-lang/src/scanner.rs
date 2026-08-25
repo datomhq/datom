@@ -329,6 +329,36 @@ mod tests {
     }
 
     #[test]
+    fn nested_generics_close_with_separate_angles() {
+        let source = "list<list<number>>";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+        assert_tokens(
+            source,
+            iter,
+            &[
+                (
+                    TokenKind::Keyword(Keyword::Collection(Collection::List)),
+                    "list",
+                ),
+                (TokenKind::LeftAngle, "<"),
+                (
+                    TokenKind::Keyword(Keyword::Collection(Collection::List)),
+                    "list",
+                ),
+                (TokenKind::LeftAngle, "<"),
+                (
+                    TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+                    "number",
+                ),
+                (TokenKind::RightAngle, ">"),
+                (TokenKind::RightAngle, ">"),
+                (TokenKind::Eof, ""),
+            ],
+        );
+    }
+
+    #[test]
     fn identifiers_end_at_punctuation() {
         let source = "type Person{name:string}";
         let diagnostics = Diagnostics::new();

@@ -644,4 +644,38 @@ mod tests {
             ],
         )
     }
+
+    #[test]
+    fn nested_collections() {
+        let source = "type Grid(cells: list<list<number>>, tags: list<set<string>>)";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::TypeStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::SingleTypeStatement,
+                    lexeme: String::from("Grid"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("cells: list<list<number>>"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("tags: list<set<string>>"),
+                },
+            ],
+        )
+    }
 }
