@@ -51,7 +51,20 @@ pub(crate) enum TypeName {
     },
 }
 
-pub(crate) type Generic = TypeName;
+/// Every token kind that may begin a type name.
+const TYPE_NAME_KINDS: &[TokenKind] = &[
+    // user-named type
+    TokenKind::Identifier,
+    // primitives
+    TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
+    // collections
+    TokenKind::Keyword(Keyword::Collection(Collection::List)),
+    TokenKind::Keyword(Keyword::Collection(Collection::Map)),
+    TokenKind::Keyword(Keyword::Collection(Collection::Set)),
+];
 
 pub(crate) fn parse(
     source: &str,
@@ -176,33 +189,21 @@ where
     }
 
     fn type_name(&mut self) -> Result<TypeName, CompileError> {
-        if self.is_any_next(&[
-            TokenKind::Keyword(Keyword::Collection(Collection::List)),
-            TokenKind::Keyword(Keyword::Collection(Collection::Map)),
-            TokenKind::Keyword(Keyword::Collection(Collection::Set)),
-        ]) {
-            let collection = self.advance_unchecked()?;
+        let type_name = self.expect_any(TYPE_NAME_KINDS)?;
+
+        if matches!(type_name.kind, TokenKind::Keyword(Keyword::Collection(_))) {
             let generic = self.generic()?;
 
             Ok(TypeName::Generic {
-                collection,
+                collection: type_name,
                 over: Box::new(generic),
             })
         } else {
-            let concrete = self.expect_any(&[
-                // user-named type
-                TokenKind::Identifier,
-                TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-            ])?;
-
-            Ok(TypeName::Concrete(concrete))
+            Ok(TypeName::Concrete(type_name))
         }
     }
 
-    fn generic(&mut self) -> Result<Generic, CompileError> {
+    fn generic(&mut self) -> Result<TypeName, CompileError> {
         let _left_angle = self.expect(TokenKind::LeftAngle)?;
         let type_name = self.type_name()?;
         let _right_angle = self.expect(TokenKind::RightAngle)?;
@@ -256,16 +257,6 @@ where
         } else {
             false
         }
-    }
-
-    fn is_any_next(&mut self, kinds: &[TokenKind]) -> bool {
-        for kind in kinds {
-            if self.is_next(*kind) {
-                return true;
-            }
-        }
-
-        false
     }
 
     /// Advance the iterator, unwrapping the Option and returning the contained Result.
