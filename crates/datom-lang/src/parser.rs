@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    Primitive,
+    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
@@ -39,7 +39,19 @@ pub(crate) struct TypeField {
     ty: TypeName,
 }
 
-pub(crate) type TypeName = Token;
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum TypeName {
+    /// Non-generic type names like identifiers and primitives.
+    Concrete(Token),
+
+    /// Generic type names, currently just collections.
+    Generic {
+        collection: Token,
+        over: Box<TypeName>,
+    },
+}
+
+pub(crate) type Generic = TypeName;
 
 pub(crate) fn parse(
     source: &str,
@@ -164,16 +176,38 @@ where
     }
 
     fn type_name(&mut self) -> Result<TypeName, CompileError> {
-        self.expect_any(&[
-            // user-named type
-            TokenKind::Identifier,
-            // TODO: should the Token encode with this much specificity? might be too clunky to work with
-            // primitives
-            TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
-            TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-        ])
+        if self.is_any_next(&[
+            TokenKind::Keyword(Keyword::Collection(Collection::List)),
+            TokenKind::Keyword(Keyword::Collection(Collection::Map)),
+            TokenKind::Keyword(Keyword::Collection(Collection::Set)),
+        ]) {
+            let collection = self.advance_unchecked()?;
+            let generic = self.generic()?;
+
+            Ok(TypeName::Generic {
+                collection,
+                over: Box::new(generic),
+            })
+        } else {
+            let concrete = self.expect_any(&[
+                // user-named type
+                TokenKind::Identifier,
+                TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
+                TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
+                TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+                TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
+            ])?;
+
+            Ok(TypeName::Concrete(concrete))
+        }
+    }
+
+    fn generic(&mut self) -> Result<Generic, CompileError> {
+        let _left_angle = self.expect(TokenKind::LeftAngle)?;
+        let type_name = self.type_name()?;
+        let _right_angle = self.expect(TokenKind::RightAngle)?;
+
+        Ok(type_name)
     }
 
     fn type_constructor(&mut self) -> Result<TypeConstructor, CompileError> {
@@ -222,6 +256,16 @@ where
         } else {
             false
         }
+    }
+
+    fn is_any_next(&mut self, kinds: &[TokenKind]) -> bool {
+        for kind in kinds {
+            if self.is_next(*kind) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Advance the iterator, unwrapping the Option and returning the contained Result.
@@ -302,8 +346,23 @@ mod tests {
         fn into_node(self, source: &'src str) -> Node {
             Node {
                 kind: NodeKind::TypeField,
-                lexeme: format!("{}: {}", self.name.lexeme(source), self.ty.lexeme(source)),
+                lexeme: format!(
+                    "{}: {}",
+                    self.name.lexeme(source),
+                    format_type_name(source, self.ty)
+                ),
             }
+        }
+    }
+
+    fn format_type_name(source: &str, type_name: TypeName) -> String {
+        match type_name {
+            TypeName::Concrete(token) => token.lexeme(source).to_string(),
+            TypeName::Generic { collection, over } => format!(
+                "{}<{}>",
+                collection.lexeme(source),
+                format_type_name(source, *over)
+            ),
         }
     }
 
@@ -365,7 +424,7 @@ mod tests {
                             for ty in tys {
                                 out.push(Node {
                                     kind: NodeKind::TypeName,
-                                    lexeme: String::from(ty.lexeme(source)),
+                                    lexeme: format_type_name(source, ty),
                                 })
                             }
                         }
@@ -555,5 +614,43 @@ mod tests {
                 },
             ],
         );
+    }
+
+    #[test]
+    fn collections() {
+        let source = "type X = list<number> | map<string> | set<datetime>;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::TypeStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::InlineVariadicTypeStatement,
+                    lexeme: String::from("X"),
+                },
+                Node {
+                    kind: NodeKind::TypeName,
+                    lexeme: String::from("list<number>"),
+                },
+                Node {
+                    kind: NodeKind::TypeName,
+                    lexeme: String::from("map<string>"),
+                },
+                Node {
+                    kind: NodeKind::TypeName,
+                    lexeme: String::from("set<datetime>"),
+                },
+            ],
+        )
     }
 }
