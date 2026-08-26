@@ -74,7 +74,7 @@ pub(crate) struct CollectionDetails {
 
 impl Display for CollectionDetails {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}<{}>", self.kind, self.generic)
+        write!(f, "{}<{}>", self.kind, self.generic.name)
     }
 }
 
@@ -380,11 +380,30 @@ mod tests {
     }
 
     #[test]
+    fn nested_collections_recurse() {
+        let inner = Type::collection(Collection::List, Type::primitive(Primitive::Number));
+        let ty = Type::collection(Collection::List, inner);
+
+        assert_eq!(ty.to_string(), "list<list<number>>");
+    }
+
+    #[test]
     fn collections_as_fields() {
         let collection = Type::collection(Collection::List, Type::primitive(Primitive::Bool));
-
         let ty = Type::single("Arena", fields([("items", collection)]));
 
         assert_eq!(ty.to_string(), "type Arena(items: list<bool>)")
+    }
+
+    #[test]
+    fn collections_print_sums() {
+        let address = Type::single(
+            "Address",
+            fields([("city", Type::primitive(Primitive::String))]),
+        );
+
+        let ty = Type::collection(Collection::List, address);
+
+        assert_eq!(ty.to_string(), "list<Address>");
     }
 }

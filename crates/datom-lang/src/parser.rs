@@ -53,6 +53,21 @@ pub(crate) enum TypeName {
 
 pub(crate) type Generic = TypeName;
 
+/// Every token kind that may begin a type name.
+const TYPE_NAME_KINDS: &[TokenKind] = &[
+    // user-named type
+    TokenKind::Identifier,
+    // primitives
+    TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
+    TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
+    // collections
+    TokenKind::Keyword(Keyword::Collection(Collection::List)),
+    TokenKind::Keyword(Keyword::Collection(Collection::Map)),
+    TokenKind::Keyword(Keyword::Collection(Collection::Set)),
+];
+
 pub(crate) fn parse(
     source: &str,
     diagnostics: &Diagnostics,
@@ -176,29 +191,17 @@ where
     }
 
     fn type_name(&mut self) -> Result<TypeName, CompileError> {
-        if self.is_any_next(&[
-            TokenKind::Keyword(Keyword::Collection(Collection::List)),
-            TokenKind::Keyword(Keyword::Collection(Collection::Map)),
-            TokenKind::Keyword(Keyword::Collection(Collection::Set)),
-        ]) {
-            let collection = self.advance_unchecked()?;
+        let type_name = self.expect_any(TYPE_NAME_KINDS)?;
+
+        if matches!(type_name.kind, TokenKind::Keyword(Keyword::Collection(_))) {
             let generic = self.generic()?;
 
             Ok(TypeName::Generic {
-                collection,
+                collection: type_name,
                 over: Box::new(generic),
             })
         } else {
-            let concrete = self.expect_any(&[
-                // user-named type
-                TokenKind::Identifier,
-                TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::DateTime)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
-                TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
-            ])?;
-
-            Ok(TypeName::Concrete(concrete))
+            Ok(TypeName::Concrete(type_name))
         }
     }
 
@@ -256,16 +259,6 @@ where
         } else {
             false
         }
-    }
-
-    fn is_any_next(&mut self, kinds: &[TokenKind]) -> bool {
-        for kind in kinds {
-            if self.is_next(*kind) {
-                return true;
-            }
-        }
-
-        false
     }
 
     /// Advance the iterator, unwrapping the Option and returning the contained Result.
@@ -649,6 +642,40 @@ mod tests {
                 Node {
                     kind: NodeKind::TypeName,
                     lexeme: String::from("set<datetime>"),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn nested_collections() {
+        let source = "type Grid(cells: list<list<number>>, tags: list<set<string>>)";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::TypeStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::SingleTypeStatement,
+                    lexeme: String::from("Grid"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("cells: list<list<number>>"),
+                },
+                Node {
+                    kind: NodeKind::TypeField,
+                    lexeme: String::from("tags: list<set<string>>"),
                 },
             ],
         )
