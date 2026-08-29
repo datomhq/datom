@@ -41,12 +41,14 @@ impl From<ParseError> for CompileError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScanError {
     UnexpectedChar,
+    UnterminatedString,
 }
 
 impl Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnexpectedChar => write!(f, "unexpected character"),
+            Self::UnterminatedString => write!(f, "unterminated string"),
         }
     }
 }

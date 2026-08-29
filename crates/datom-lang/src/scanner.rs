@@ -21,6 +21,8 @@ pub(crate) enum TokenKind {
     Colon,
     Keyword(Keyword),
     Identifier,
+    String,
+    Number,
     Eof,
 }
 
@@ -38,12 +40,16 @@ impl Display for TokenKind {
             TokenKind::RightAngle => "`>`",
             TokenKind::Comma => "`,`",
             TokenKind::Colon => "`:`",
-            TokenKind::Keyword(Keyword::Type) => "`type`",
-            TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "`{primitive}`"),
-            TokenKind::Keyword(Keyword::Collection(collection)) => {
-                return write!(f, "`{collection}`");
-            }
+            TokenKind::Keyword(keyword) => match keyword {
+                Keyword::Type => "`type`",
+                Keyword::True => "`true`",
+                Keyword::False => "`false`",
+                Keyword::Primitive(primitive) => return write!(f, "`{primitive}`"),
+                Keyword::Collection(collection) => return write!(f, "`{collection}`"),
+            },
             TokenKind::Identifier => "an identifier",
+            TokenKind::String => "a string",
+            TokenKind::Number => "a number",
             TokenKind::Eof => "<EOF>",
         };
 
@@ -56,6 +62,8 @@ pub(crate) enum Keyword {
     Type,
     Primitive(Primitive),
     Collection(Collection),
+    True,
+    False,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +170,29 @@ impl<'s, 'd> Scanner<'s, 'd> {
 
         Token::new(kind, start, end)
     }
+
+    fn string(&mut self) -> Result<Token, CompileError> {
+        let start = self.offset;
+
+        while self.chars.peek().is_some_and(|&c| c != '"') {
+            self.advance();
+        }
+
+        match self.chars.next() {
+            None => {
+                self.diag
+                    .error("Unterminated string literal", start, self.offset + 1);
+
+                Err(ScanError::UnterminatedString.into())
+            }
+            Some(_) => {
+                // update the offset to match the call to next
+                self.offset += 1;
+
+                Ok(Token::new(TokenKind::String, start, self.offset + 1))
+            }
+        }
+    }
 }
 
 impl<'s, 'd> Iterator for Scanner<'s, 'd> {
@@ -187,6 +218,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         '>' => Token::new(TokenKind::RightAngle, self.offset, self.offset + 1),
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
+                        '"' => return Some(self.string()),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
@@ -484,6 +516,38 @@ mod tests {
                 ),
                 (TokenKind::Eof, ""),
             ],
+        );
+    }
+
+    #[test]
+    fn basic_string_literal() {
+        let source = r#""hello""#;
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::String, "\"hello\""), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn unterminated_string() {
+        let source = r#""hello"#;
+        let diagnostics = Diagnostics::new();
+        let mut iter = scan(source, &diagnostics);
+
+        let result = iter.next();
+
+        assert!(matches!(
+            result,
+            Some(Err(CompileError::Scan(ScanError::UnterminatedString)))
+        ));
+        assert!(!diagnostics.is_ok());
+        assert_eq!(
+            diagnostics.render(source),
+            "[1:0] error: Unterminated string literal".to_string()
         );
     }
 }
