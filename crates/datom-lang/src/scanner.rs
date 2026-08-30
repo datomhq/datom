@@ -161,6 +161,8 @@ impl<'s, 'd> Scanner<'s, 'd> {
 
         let kind = match ident {
             "type" => TokenKind::Keyword(Keyword::Type),
+            "true" => TokenKind::Keyword(Keyword::True),
+            "false" => TokenKind::Keyword(Keyword::False),
             "string" => TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
             "number" => TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
             "bool" => TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
@@ -327,7 +329,7 @@ mod tests {
 
     #[test]
     fn keywords() {
-        let source = "type string number bool datetime list map set";
+        let source = "type true false string number bool datetime list map set";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -335,6 +337,8 @@ mod tests {
             iter,
             &[
                 (TokenKind::Keyword(Keyword::Type), "type"),
+                (TokenKind::Keyword(Keyword::True), "true"),
+                (TokenKind::Keyword(Keyword::False), "false"),
                 (
                     TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
                     "string",
