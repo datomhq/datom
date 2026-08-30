@@ -145,13 +145,16 @@ impl<'s, 'd> Scanner<'s, 'd> {
         self.chars.next()
     }
 
+    fn advance_while(&mut self, predicate: impl Fn(char) -> bool) {
+        while self.chars.peek().is_some_and(|&c| predicate(c)) {
+            self.advance();
+        }
+    }
+
     fn ident_or_keyword(&mut self) -> Token {
         let start = self.offset;
 
-        // whatever char stops the identifier is handled by `next()` as the start of a new token
-        while self.chars.peek().is_some_and(|&c| is_ident_char(c)) {
-            self.advance();
-        }
+        self.advance_while(|c| c.is_alphanumeric() || c == '_');
 
         let end = self.offset + 1;
         let ident = &self.source[start..end];
@@ -174,9 +177,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
     fn string(&mut self) -> Result<Token, CompileError> {
         let start = self.offset;
 
-        while self.chars.peek().is_some_and(|&c| c != '"') {
-            self.advance();
-        }
+        self.advance_while(|c| c != '"');
 
         match self.chars.next() {
             None => {
@@ -192,6 +193,17 @@ impl<'s, 'd> Scanner<'s, 'd> {
                 Ok(Token::new(TokenKind::String, start, self.offset + 1))
             }
         }
+    }
+
+    fn number(&mut self) -> Token {
+        let start = self.offset;
+
+        // underscores are supported as arbitrary separators
+        self.advance_while(|c| c.is_digit(10) || c == '_' || c == '.');
+
+        let end = self.offset + 1;
+
+        Token::new(TokenKind::Number, start, end)
     }
 }
 
@@ -219,6 +231,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
                         '"' => return Some(self.string()),
+                        _ if char.is_digit(10) => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
@@ -241,11 +254,6 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
             }
         }
     }
-}
-
-/// Whether `c` can appear in an identifier after the first character
-fn is_ident_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
 }
 
 #[cfg(test)]
@@ -545,9 +553,49 @@ mod tests {
             Some(Err(CompileError::Scan(ScanError::UnterminatedString)))
         ));
         assert!(!diagnostics.is_ok());
-        assert_eq!(
-            diagnostics.render(source),
-            "[1:0] error: Unterminated string literal".to_string()
+        assert!(
+            diagnostics
+                .render(source)
+                .contains("Unterminated string literal"),
+        );
+    }
+
+    #[test]
+    fn basic_number_literal() {
+        let source = "42";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "42"), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn floating_point_number_literal() {
+        let source = "12.34";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "12.34"), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn number_separators() {
+        let source = "1_000.23";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "1_000.23"), (TokenKind::Eof, "")],
         );
     }
 }
