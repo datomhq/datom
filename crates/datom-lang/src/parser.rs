@@ -15,6 +15,7 @@ pub(crate) struct Program {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Statement {
     Type(TypeStatement),
+    Expr(Expr),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -52,6 +53,13 @@ pub(crate) enum TypeName {
 }
 
 pub(crate) type Generic = TypeName;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum Expr {
+    Number(Token),
+    String(Token),
+    Bool(Token),
+}
 
 /// Every token kind that may begin a type name.
 const TYPE_NAME_KINDS: &[TokenKind] = &[
@@ -123,6 +131,20 @@ where
             self.advance_unchecked()?;
             let stmt = self.type_statement()?;
             Ok(Statement::Type(stmt))
+        } else if self.is_next(TokenKind::Number) {
+            let number = self.advance_unchecked()?;
+            let _semicolon = self.expect(TokenKind::Semicolon)?;
+            Ok(Statement::Expr(Expr::Number(number)))
+        } else if self.is_next(TokenKind::String) {
+            let string = self.advance_unchecked()?;
+            let _semicolon = self.expect(TokenKind::Semicolon)?;
+            Ok(Statement::Expr(Expr::String(string)))
+        } else if self.is_next(TokenKind::Keyword(Keyword::True))
+            || self.is_next(TokenKind::Keyword(Keyword::False))
+        {
+            let bool = self.advance_unchecked()?;
+            let _semicolon = self.expect(TokenKind::Semicolon)?;
+            Ok(Statement::Expr(Expr::Bool(bool)))
         } else {
             let actual = match self.tokens.next() {
                 Some(result) => Some(result?.kind),
@@ -323,6 +345,10 @@ mod tests {
         TypeConstructor,
         TypeField,
         TypeName,
+        ExprStatement,
+        NumberExpr,
+        StringExpr,
+        BoolExpr,
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -422,6 +448,29 @@ mod tests {
                             }
                         }
                     }
+                }
+                Statement::Expr(expr) => {
+                    out.push(Node {
+                        kind: NodeKind::ExprStatement,
+                        lexeme: String::new(),
+                    });
+
+                    let node = match expr {
+                        Expr::Number(token) => Node {
+                            kind: NodeKind::NumberExpr,
+                            lexeme: String::from(token.lexeme(source)),
+                        },
+                        Expr::String(token) => Node {
+                            kind: NodeKind::StringExpr,
+                            lexeme: String::from(token.lexeme(source)),
+                        },
+                        Expr::Bool(token) => Node {
+                            kind: NodeKind::BoolExpr,
+                            lexeme: String::from(token.lexeme(source)),
+                        },
+                    };
+
+                    out.push(node);
                 }
             }
         }
@@ -679,5 +728,91 @@ mod tests {
                 },
             ],
         )
+    }
+
+    #[test]
+    fn number_expression() {
+        let source = "1_000.23;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("1_000.23"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn string_expression() {
+        let source = r#""hello";"#;
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::StringExpr,
+                    lexeme: String::from("\"hello\""),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn bool_expression() {
+        let source = r#"true; false;"#;
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::BoolExpr,
+                    lexeme: String::from("true"),
+                },
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::BoolExpr,
+                    lexeme: String::from("false"),
+                },
+            ],
+        );
     }
 }
