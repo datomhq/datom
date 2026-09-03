@@ -2,6 +2,7 @@
 program |- (statement)*
 
 statement |- typeStatement
+          | exprStatement
 
 typeStatement |- "type" typeConstructor
               | "type" ident "{" typeConstructor ("," typeConstructor)* (",")? "}"
@@ -22,6 +23,16 @@ primitive |- "number" | "string" | "bool" | "datetime"
 collection |- "list" generic | "map" generic | "set" generic
 
 generic |- "<" typeName ">"
+
+exprStatement |- expr ";"
+
+expr |- number | string | bool
+
+number |- [0-9]([0-9._])*
+
+string |- """ .* """
+
+bool |- "true" | "false"
 ```
 
 legend:

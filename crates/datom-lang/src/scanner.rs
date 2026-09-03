@@ -21,6 +21,8 @@ pub(crate) enum TokenKind {
     Colon,
     Keyword(Keyword),
     Identifier,
+    String,
+    Number,
     Eof,
 }
 
@@ -38,12 +40,16 @@ impl Display for TokenKind {
             TokenKind::RightAngle => "`>`",
             TokenKind::Comma => "`,`",
             TokenKind::Colon => "`:`",
-            TokenKind::Keyword(Keyword::Type) => "`type`",
-            TokenKind::Keyword(Keyword::Primitive(primitive)) => return write!(f, "`{primitive}`"),
-            TokenKind::Keyword(Keyword::Collection(collection)) => {
-                return write!(f, "`{collection}`");
-            }
+            TokenKind::Keyword(keyword) => match keyword {
+                Keyword::Type => "`type`",
+                Keyword::True => "`true`",
+                Keyword::False => "`false`",
+                Keyword::Primitive(primitive) => return write!(f, "`{primitive}`"),
+                Keyword::Collection(collection) => return write!(f, "`{collection}`"),
+            },
             TokenKind::Identifier => "an identifier",
+            TokenKind::String => "a string",
+            TokenKind::Number => "a number",
             TokenKind::Eof => "<EOF>",
         };
 
@@ -56,6 +62,8 @@ pub(crate) enum Keyword {
     Type,
     Primitive(Primitive),
     Collection(Collection),
+    True,
+    False,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,19 +145,24 @@ impl<'s, 'd> Scanner<'s, 'd> {
         self.chars.next()
     }
 
+    fn advance_while(&mut self, predicate: impl Fn(char) -> bool) {
+        while self.chars.peek().is_some_and(|&c| predicate(c)) {
+            self.advance();
+        }
+    }
+
     fn ident_or_keyword(&mut self) -> Token {
         let start = self.offset;
 
-        // whatever char stops the identifier is handled by `next()` as the start of a new token
-        while self.chars.peek().is_some_and(|&c| is_ident_char(c)) {
-            self.advance();
-        }
+        self.advance_while(|c| c.is_alphanumeric() || c == '_');
 
         let end = self.offset + 1;
         let ident = &self.source[start..end];
 
         let kind = match ident {
             "type" => TokenKind::Keyword(Keyword::Type),
+            "true" => TokenKind::Keyword(Keyword::True),
+            "false" => TokenKind::Keyword(Keyword::False),
             "string" => TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
             "number" => TokenKind::Keyword(Keyword::Primitive(Primitive::Number)),
             "bool" => TokenKind::Keyword(Keyword::Primitive(Primitive::Bool)),
@@ -161,6 +174,38 @@ impl<'s, 'd> Scanner<'s, 'd> {
         };
 
         Token::new(kind, start, end)
+    }
+
+    fn string(&mut self) -> Result<Token, CompileError> {
+        let start = self.offset;
+
+        self.advance_while(|c| c != '"');
+
+        match self.chars.next() {
+            None => {
+                self.diag
+                    .error("Unterminated string literal", start, self.offset + 1);
+
+                Err(ScanError::UnterminatedString.into())
+            }
+            Some(_) => {
+                // update the offset to match the call to next
+                self.offset += 1;
+
+                Ok(Token::new(TokenKind::String, start, self.offset + 1))
+            }
+        }
+    }
+
+    fn number(&mut self) -> Token {
+        let start = self.offset;
+
+        // underscores are supported as arbitrary separators
+        self.advance_while(|c| c.is_digit(10) || c == '_' || c == '.');
+
+        let end = self.offset + 1;
+
+        Token::new(TokenKind::Number, start, end)
     }
 }
 
@@ -187,6 +232,8 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         '>' => Token::new(TokenKind::RightAngle, self.offset, self.offset + 1),
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
+                        '"' => return Some(self.string()),
+                        _ if char.is_digit(10) => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
@@ -209,11 +256,6 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
             }
         }
     }
-}
-
-/// Whether `c` can appear in an identifier after the first character
-fn is_ident_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
 }
 
 #[cfg(test)]
@@ -287,7 +329,7 @@ mod tests {
 
     #[test]
     fn keywords() {
-        let source = "type string number bool datetime list map set";
+        let source = "type true false string number bool datetime list map set";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -295,6 +337,8 @@ mod tests {
             iter,
             &[
                 (TokenKind::Keyword(Keyword::Type), "type"),
+                (TokenKind::Keyword(Keyword::True), "true"),
+                (TokenKind::Keyword(Keyword::False), "false"),
                 (
                     TokenKind::Keyword(Keyword::Primitive(Primitive::String)),
                     "string",
@@ -484,6 +528,78 @@ mod tests {
                 ),
                 (TokenKind::Eof, ""),
             ],
+        );
+    }
+
+    #[test]
+    fn basic_string_literal() {
+        let source = r#""hello""#;
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::String, "\"hello\""), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn unterminated_string() {
+        let source = r#""hello"#;
+        let diagnostics = Diagnostics::new();
+        let mut iter = scan(source, &diagnostics);
+
+        let result = iter.next();
+
+        assert!(matches!(
+            result,
+            Some(Err(CompileError::Scan(ScanError::UnterminatedString)))
+        ));
+        assert!(!diagnostics.is_ok());
+        assert!(
+            diagnostics
+                .render(source)
+                .contains("Unterminated string literal"),
+        );
+    }
+
+    #[test]
+    fn basic_number_literal() {
+        let source = "42";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "42"), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn floating_point_number_literal() {
+        let source = "12.34";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "12.34"), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn number_separators() {
+        let source = "1_000.23";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Number, "1_000.23"), (TokenKind::Eof, "")],
         );
     }
 }
