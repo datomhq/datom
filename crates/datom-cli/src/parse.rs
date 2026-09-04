@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// `datom parse <file>`: validate a source file's syntax and print its AST.
 pub fn parse(file: &Path) -> Result<()> {
@@ -11,14 +11,13 @@ pub fn parse(file: &Path) -> Result<()> {
         fs::read_to_string(file).with_context(|| format!("could not read `{}`", file.display()))?;
 
     match lang::parse(&source) {
-        Ok(parsed) => {
-            print!("{}", parsed.tree);
-            eprint!("{}", parsed.diagnostics);
+        Ok(tree) => {
+            print!("{tree}");
             Ok(())
         }
         Err(failure) => {
-            eprint!("{}", failure.diagnostics());
-            Err(failure).with_context(|| format!("could not parse `{}`", file.display()))
+            eprintln!("{failure}");
+            bail!("could not parse `{}`", file.display())
         }
     }
 }
