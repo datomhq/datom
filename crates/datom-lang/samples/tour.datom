@@ -1,0 +1,81 @@
+type Tag(label: string)
+
+type Money(
+  amount: number,
+  currency: string,
+)
+
+type Address(
+  line1: string,
+  line2: string,
+  city: string,
+  postal_code: string,
+)
+
+type Customer(
+  id: number,
+  full_name: string,
+  email: string,
+  billing: Address,
+  shipping: Address,
+  tags: set<string>,
+  signed_up: datetime,
+  is_active: bool,
+)
+
+type Product {
+  Online(
+    sku: string,
+    name: string,
+    url: string,
+    price: Money,
+  ),
+  InStore(
+    sku: string,
+    name: string,
+    price: Money,
+    aisle: number,
+    bay: number,
+  ),
+}
+
+type OrderStatus {
+  Pending(placed_at: datetime),
+  Shipped(shipped_at: datetime, carrier: string),
+  Cancelled(cancelled_at: datetime, reason: string),
+}
+
+type LineItem(
+  product: Product,
+  quantity: number,
+  unit_price: Money,
+  discount: Money,
+)
+
+type Order(
+  id: number,
+  customer: Customer,
+  items: list<LineItem>,
+  status: OrderStatus,
+  total: Money,
+  placed_at: datetime,
+)
+
+type Grid(
+  cells: list<list<number>>,
+  labels: map<string>,
+)
+
+type Sku = string;
+
+type Id = string | number;
+
+type Party = Customer | Product | Tag;
+
+type Anything = list<number> | set<string> | Money;
+
+42;
+1_000.23;
+"hello, datom";
+true;
+false;

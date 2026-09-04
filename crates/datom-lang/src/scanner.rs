@@ -504,7 +504,7 @@ mod tests {
         let rendered = diagnostics.render(source);
 
         // has the correct line:col coordinate
-        assert!(rendered.contains("[1:9]"));
+        assert!(rendered.contains("[1:10]"));
 
         // indicates it's an error severity
         assert!(rendered.contains("error"));

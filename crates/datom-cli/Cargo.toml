@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 datom-core = { path = "../datom-core" }
+lang = { path = "../datom-lang" }
 anyhow.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
