@@ -91,7 +91,7 @@ impl Error for ParseError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Primitive, scanner::Keyword};
+    use crate::{scanner::Keyword, types::Primitive};
 
     #[test]
     fn a_single_expected_kind_reads_as_a_sentence() {
