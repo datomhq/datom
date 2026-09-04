@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, range::Range};
 
 use crate::{
     Collection, Primitive,
@@ -146,12 +146,19 @@ where
             let _semicolon = self.expect(TokenKind::Semicolon)?;
             Ok(Statement::Expr(Expr::Bool(bool)))
         } else {
-            let actual = match self.tokens.next() {
-                Some(result) => Some(result?.kind),
-                None => None,
+            let actual = self.tokens.next().transpose()?;
+            let range = match actual {
+                Some(token) => token.range,
+                None => self.eof(),
             };
 
-            Err(ParseError::Expected(vec![TokenKind::Keyword(Keyword::Type)], actual).into())
+            Err(self.report(
+                ParseError::Expected(
+                    vec![TokenKind::Keyword(Keyword::Type)],
+                    actual.map(|token| token.kind),
+                ),
+                range,
+            ))
         }
     }
 
@@ -197,20 +204,23 @@ where
             let _semi = self.expect(TokenKind::Semicolon)?;
             Ok(TypeStatement::InlineVariadic((ident, tys)))
         } else {
-            let actual = match self.tokens.next() {
-                Some(result) => Some(result?.kind),
-                None => None,
+            let actual = self.tokens.next().transpose()?;
+            let range = match actual {
+                Some(token) => token.range,
+                None => self.eof(),
             };
 
-            Err(ParseError::Expected(
-                vec![
-                    TokenKind::LeftParen,
-                    TokenKind::LeftCurly,
-                    TokenKind::Equals,
-                ],
-                actual,
-            )
-            .into())
+            Err(self.report(
+                ParseError::Expected(
+                    vec![
+                        TokenKind::LeftParen,
+                        TokenKind::LeftCurly,
+                        TokenKind::Equals,
+                    ],
+                    actual.map(|token| token.kind),
+                ),
+                range,
+            ))
         }
     }
 
@@ -303,32 +313,47 @@ where
     /// Advance the iterator and confirm the received token is of the expected kind. Returns
     /// a ParseError if the token is not the right kind.
     fn expect(&mut self, kind: TokenKind) -> Result<Token, CompileError> {
-        if let Some(next_token) = self.tokens.next() {
-            let next_token = next_token?;
-
-            if next_token.kind == kind {
-                Ok(next_token)
-            } else {
-                Err(ParseError::Expected(vec![kind], Some(next_token.kind)).into())
-            }
-        } else {
-            Err(ParseError::Expected(vec![kind], Some(TokenKind::Eof)).into())
+        match self.tokens.next().transpose()? {
+            Some(token) if token.kind == kind => Ok(token),
+            Some(token) => Err(self.report(
+                ParseError::Expected(vec![kind], Some(token.kind)),
+                token.range,
+            )),
+            None => Err(self.report(
+                ParseError::Expected(vec![kind], Some(TokenKind::Eof)),
+                self.eof(),
+            )),
         }
     }
 
     fn expect_any(&mut self, kinds: &[TokenKind]) -> Result<Token, CompileError> {
-        if let Some(next_token) = self.tokens.next() {
-            let next_token = next_token?;
+        match self.tokens.next().transpose()? {
+            Some(token) if kinds.contains(&token.kind) => Ok(token),
+            Some(token) => Err(self.report(
+                ParseError::Expected(Vec::from(kinds), Some(token.kind)),
+                token.range,
+            )),
+            None => Err(self.report(
+                ParseError::Expected(Vec::from(kinds), Some(TokenKind::Eof)),
+                self.eof(),
+            )),
+        }
+    }
 
-            for expected in kinds {
-                if next_token.kind == *expected {
-                    return Ok(next_token);
-                }
-            }
+    /// Records `error` against `range` and hands it back, ready to bubble up.
+    ///
+    /// Parse errors go through the same sink the scanner reports to, so every
+    /// failure reaches the user positioned rather than bare.
+    fn report(&self, error: ParseError, range: Range<usize>) -> CompileError {
+        self.diag.error(error.to_string(), range.start, range.end);
+        error.into()
+    }
 
-            Err(ParseError::Expected(Vec::from(kinds), Some(next_token.kind)).into())
-        } else {
-            Err(ParseError::Expected(Vec::from(kinds), Some(TokenKind::Eof)).into())
+    /// The range an error that ran out of tokens points to.
+    fn eof(&self) -> Range<usize> {
+        Range {
+            start: self.source.len(),
+            end: self.source.len(),
         }
     }
 }

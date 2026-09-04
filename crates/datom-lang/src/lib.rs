@@ -210,26 +210,18 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
     f.write_str(")")
 }
 
-/// A fatal error that stopped compilation, already rendered for display.
+/// The diagnostics from a compilation that failed, one per line.
+///
+/// Compilation aborts at the first token it cannot use, so this is everything
+/// reported up to and including the error that stopped it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileFailure {
-    message: String,
     diagnostics: String,
-}
-
-impl CompileFailure {
-    /// Diagnostics raised before compilation stopped, one per line.
-    ///
-    /// A parse error aborts at the first token it cannot use, so anything the
-    /// scanner reported on the way here is still worth showing.
-    pub fn diagnostics(&self) -> &str {
-        &self.diagnostics
-    }
 }
 
 impl Display for CompileFailure {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(self.diagnostics.trim_end())
     }
 }
 
@@ -245,8 +237,7 @@ pub fn parse(source: &str) -> Result<String, CompileFailure> {
 
     match parser::parse(source, &diag, tokens) {
         Ok(program) => Ok(tree::render(source, &program)),
-        Err(err) => Err(CompileFailure {
-            message: err.to_string(),
+        Err(_) => Err(CompileFailure {
             diagnostics: diag.render(source),
         }),
     }

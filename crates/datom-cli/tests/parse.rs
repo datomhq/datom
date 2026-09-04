@@ -62,7 +62,7 @@ fn a_parse_error_fails_and_names_what_it_wanted() {
     let output = parse(dir.path(), "type Person(name string)\n");
 
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("expected `:`, found `string`"));
+    assert!(stderr(&output).contains("[1:18] error: Expected `:`, found `string`"));
 }
 
 #[test]
