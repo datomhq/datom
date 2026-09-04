@@ -210,18 +210,6 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
     f.write_str(")")
 }
 
-/// A parsed source file, rendered for reading.
-///
-/// The AST itself stays internal while the compiler's shape is in flux, so what
-/// crosses the crate boundary is the rendering rather than the tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Parsed {
-    /// The syntax tree as an indented outline, one node per line.
-    pub tree: String,
-    /// Diagnostics raised on the way, one per line; empty when there were none.
-    pub diagnostics: String,
-}
-
 /// A fatal error that stopped compilation, already rendered for display.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileFailure {
@@ -249,17 +237,14 @@ impl std::error::Error for CompileFailure {}
 
 /// Parse `source` and render its syntax tree.
 ///
-/// This is what `datom parse` prints. Unlike [`compile`], it reports the
+/// Unlike [`compile`], a failure carries the
 /// diagnostics collected along the way instead of dropping them.
-pub fn parse(source: &str) -> Result<Parsed, CompileFailure> {
+pub fn parse(source: &str) -> Result<String, CompileFailure> {
     let diag = diagnostics::Diagnostics::new();
     let tokens = scanner::scan(source, &diag);
 
     match parser::parse(source, &diag, tokens) {
-        Ok(program) => Ok(Parsed {
-            tree: tree::render(source, &program),
-            diagnostics: diag.render(source),
-        }),
+        Ok(program) => Ok(tree::render(source, &program)),
         Err(err) => Err(CompileFailure {
             message: err.to_string(),
             diagnostics: diag.render(source),

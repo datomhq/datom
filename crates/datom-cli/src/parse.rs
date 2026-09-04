@@ -11,9 +11,8 @@ pub fn parse(file: &Path) -> Result<()> {
         fs::read_to_string(file).with_context(|| format!("could not read `{}`", file.display()))?;
 
     match lang::parse(&source) {
-        Ok(parsed) => {
-            print!("{}", parsed.tree);
-            eprint!("{}", parsed.diagnostics);
+        Ok(tree) => {
+            print!("{tree}");
             Ok(())
         }
         Err(failure) => {
