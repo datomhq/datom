@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct Program {
-    statements: Vec<Statement>,
+    pub(crate) statements: Vec<Statement>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,8 +20,8 @@ pub(crate) enum Statement {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct TypeConstructor {
-    name: Token,
-    fields: TypeFields,
+    pub(crate) name: Token,
+    pub(crate) fields: TypeFields,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -36,8 +36,8 @@ pub(crate) type TypeFields = Vec<TypeField>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct TypeField {
-    name: Token,
-    ty: TypeName,
+    pub(crate) name: Token,
+    pub(crate) ty: TypeName,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -198,17 +198,19 @@ where
             Ok(TypeStatement::InlineVariadic((ident, tys)))
         } else {
             let actual = match self.tokens.next() {
-                Some(token) => match token {
-                    Ok(token) => Some(token.kind),
-                    Err(_) => None,
-                },
+                Some(result) => Some(result?.kind),
                 None => None,
             };
 
-            Err(
-                ParseError::Expected(vec![TokenKind::LeftParen, TokenKind::LeftCurly], actual)
-                    .into(),
+            Err(ParseError::Expected(
+                vec![
+                    TokenKind::LeftParen,
+                    TokenKind::LeftCurly,
+                    TokenKind::Equals,
+                ],
+                actual,
             )
+            .into())
         }
     }
 
@@ -334,6 +336,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::type_name;
     use std::collections::VecDeque;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -368,20 +371,9 @@ mod tests {
                 lexeme: format!(
                     "{}: {}",
                     self.name.lexeme(source),
-                    format_type_name(source, self.ty)
+                    type_name(source, &self.ty)
                 ),
             }
-        }
-    }
-
-    fn format_type_name(source: &str, type_name: TypeName) -> String {
-        match type_name {
-            TypeName::Concrete(token) => token.lexeme(source).to_string(),
-            TypeName::Generic { collection, over } => format!(
-                "{}<{}>",
-                collection.lexeme(source),
-                format_type_name(source, *over)
-            ),
         }
     }
 
@@ -443,7 +435,7 @@ mod tests {
                             for ty in tys {
                                 out.push(Node {
                                     kind: NodeKind::TypeName,
-                                    lexeme: format_type_name(source, ty),
+                                    lexeme: type_name(source, &ty),
                                 })
                             }
                         }

@@ -1,8 +1,10 @@
 //! `datom` — command-line interface for the datom-connect data platform.
 
 mod datasource;
+mod parse;
 
 use std::env;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -21,6 +23,12 @@ enum Command {
     Init {
         /// Name of the project to create.
         name: String,
+    },
+
+    /// Validate a datom source file's syntax and print its AST.
+    Parse {
+        /// Path of the source file to parse.
+        file: PathBuf,
     },
 
     /// Manage data sources.
@@ -117,6 +125,7 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("failed to create project `{name}`"))?;
             println!("Project {name} created!");
         }
+        Command::Parse { file } => parse::parse(&file)?,
         Command::Datasource(cmd) => match cmd {
             DatasourceCommand::Add { name, api } => datasource::add(&name, api)?,
             DatasourceCommand::Endpoint(cmd) => match cmd {
