@@ -19,6 +19,11 @@ pub(crate) enum TokenKind {
     RightAngle,
     Comma,
     Colon,
+    Bang,
+    Minus,
+    Plus,
+    Star,
+    Slash,
     Keyword(Keyword),
     Identifier,
     String,
@@ -40,6 +45,11 @@ impl Display for TokenKind {
             TokenKind::RightAngle => "`>`",
             TokenKind::Comma => "`,`",
             TokenKind::Colon => "`:`",
+            TokenKind::Bang => "!",
+            TokenKind::Minus => "-",
+            TokenKind::Plus => "+",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
             TokenKind::Keyword(keyword) => match keyword {
                 Keyword::Type => "`type`",
                 Keyword::True => "`true`",
@@ -232,6 +242,11 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         '>' => Token::new(TokenKind::RightAngle, self.offset, self.offset + 1),
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
+                        '!' => Token::new(TokenKind::Bang, self.offset, self.offset + 1),
+                        '-' => Token::new(TokenKind::Minus, self.offset, self.offset + 1),
+                        '+' => Token::new(TokenKind::Plus, self.offset, self.offset + 1),
+                        '*' => Token::new(TokenKind::Star, self.offset, self.offset + 1),
+                        '/' => Token::new(TokenKind::Slash, self.offset, self.offset + 1),
                         '"' => return Some(self.string()),
                         _ if char.is_digit(10) => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
@@ -304,7 +319,7 @@ mod tests {
 
     #[test]
     fn punctuation() {
-        let source = "(){}:,|=;<>";
+        let source = "(){}:!-+*/,|=;<>";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -316,6 +331,11 @@ mod tests {
                 (TokenKind::LeftCurly, "{"),
                 (TokenKind::RightCurly, "}"),
                 (TokenKind::Colon, ":"),
+                (TokenKind::Bang, "!"),
+                (TokenKind::Minus, "-"),
+                (TokenKind::Plus, "+"),
+                (TokenKind::Star, "*"),
+                (TokenKind::Slash, "/"),
                 (TokenKind::Comma, ","),
                 (TokenKind::Bar, "|"),
                 (TokenKind::Equals, "="),
