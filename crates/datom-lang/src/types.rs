@@ -54,7 +54,7 @@ impl Display for Collection {
 pub(crate) type Fields = HashMap<String, Type>;
 
 /// A sum type within the datom type system.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Sum {
     /// A single sum type has only a single variant, implicitly named the same as the overall type.
     Single(Fields),
@@ -64,10 +64,20 @@ pub(crate) enum Sum {
     InlineVariadic(Vec<Type>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CollectionDetails {
     kind: Collection,
     generic: Box<Type>,
+}
+
+impl CollectionDetails {
+    pub(crate) fn kind(&self) -> Collection {
+        self.kind
+    }
+
+    pub(crate) fn generic(&self) -> &Type {
+        &self.generic
+    }
 }
 
 impl Display for CollectionDetails {
@@ -77,7 +87,7 @@ impl Display for CollectionDetails {
 }
 
 /// A type within the datom type system.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Type {
     pub name: String,
     pub details: TypeDetails,
@@ -138,7 +148,7 @@ impl Display for Type {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TypeDetails {
     Primitive(Primitive),
     Sum(Sum),
@@ -390,5 +400,41 @@ mod tests {
         let ty = Type::collection(Collection::List, address);
 
         assert_eq!(ty.to_string(), "list<Address>");
+    }
+
+    #[test]
+    fn fields_compare_without_regard_to_insertion_order() {
+        let one = Type::single(
+            "Zoo",
+            fields([
+                ("zebra", Type::primitive(Primitive::Bool)),
+                ("apple", Type::primitive(Primitive::Bool)),
+            ]),
+        );
+
+        let other = Type::single(
+            "Zoo",
+            fields([
+                ("apple", Type::primitive(Primitive::Bool)),
+                ("zebra", Type::primitive(Primitive::Bool)),
+            ]),
+        );
+
+        assert_eq!(one, other);
+    }
+
+    #[test]
+    fn variant_order_is_significant() {
+        let variants = |first: &str, second: &str| {
+            vec![
+                (String::from(first), fields([])),
+                (String::from(second), fields([])),
+            ]
+        };
+
+        let one = Type::variadic("Major", variants("Undeclared", "Declared"));
+        let other = Type::variadic("Major", variants("Declared", "Undeclared"));
+
+        assert_ne!(one, other);
     }
 }
