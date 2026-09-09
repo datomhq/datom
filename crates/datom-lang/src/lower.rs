@@ -42,7 +42,9 @@ impl Lowering<'_, '_> {
         let mut types = Vec::new();
 
         for statement in &program.statements {
-            let Statement::Type(declaration) = statement else { continue };
+            let Statement::Type(declaration) = statement else {
+                continue;
+            };
 
             let ty = self.type_statement(declaration)?;
             self.scope.insert(ty.name.clone(), ty.clone());
