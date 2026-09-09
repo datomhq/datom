@@ -1,9 +1,9 @@
 use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ScanError},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

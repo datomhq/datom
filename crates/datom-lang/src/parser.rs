@@ -1,10 +1,10 @@
 use std::{iter::Peekable, range::Range};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
