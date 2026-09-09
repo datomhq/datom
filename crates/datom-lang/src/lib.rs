@@ -4,6 +4,7 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) mod diagnostics;
 pub(crate) mod error;
+pub(crate) mod lower;
 pub(crate) mod parser;
 pub(crate) mod scanner;
 pub(crate) mod tree;
@@ -40,6 +41,19 @@ pub fn parse(source: &str) -> Result<String, CompileFailure> {
             diagnostics: diag.render(source),
         }),
     }
+}
+
+/// Parse `source` and lower its declarations into the semantic type model.
+#[allow(private_interfaces)]
+pub fn types(source: &str) -> Result<Vec<types::Type>, CompileFailure> {
+    let diag = diagnostics::Diagnostics::new();
+    let tokens = scanner::scan(source, &diag);
+
+    parser::parse(source, &diag, tokens)
+        .and_then(|program| lower::lower(source, &program, &diag))
+        .map_err(|_| CompileFailure {
+            diagnostics: diag.render(source),
+        })
 }
 
 // The final signature will not return the parser::Program AST; this is just done as a stopgap for now.

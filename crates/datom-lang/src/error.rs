@@ -6,6 +6,7 @@ use crate::scanner::TokenKind;
 pub(crate) enum CompileError {
     Scan(ScanError),
     Parse(ParseError),
+    Lower(LowerError),
 }
 
 impl Display for CompileError {
@@ -13,6 +14,7 @@ impl Display for CompileError {
         match self {
             Self::Scan(err) => write!(f, "{}", err),
             Self::Parse(err) => write!(f, "{}", err),
+            Self::Lower(err) => write!(f, "{}", err),
         }
     }
 }
@@ -22,6 +24,7 @@ impl Error for CompileError {
         match self {
             Self::Scan(err) => Some(err),
             Self::Parse(err) => Some(err),
+            Self::Lower(err) => Some(err),
         }
     }
 }
@@ -35,6 +38,12 @@ impl From<ScanError> for CompileError {
 impl From<ParseError> for CompileError {
     fn from(value: ParseError) -> Self {
         CompileError::Parse(value)
+    }
+}
+
+impl From<LowerError> for CompileError {
+    fn from(value: LowerError) -> Self {
+        CompileError::Lower(value)
     }
 }
 
@@ -87,6 +96,29 @@ impl Display for ParseError {
 }
 
 impl Error for ParseError {}
+
+/// A failure to turn a well-formed syntax tree into the semantic type model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LowerError {
+    /// A type name no declaration in scope introduces.
+    UnknownType(String),
+    /// A second declaration claiming a name already taken.
+    DuplicateType(String),
+    /// A field name the record already has.
+    DuplicateField(String),
+}
+
+impl Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownType(name) => write!(f, "Unknown type `{name}`"),
+            Self::DuplicateType(name) => write!(f, "Duplicate type `{name}`"),
+            Self::DuplicateField(name) => write!(f, "Duplicate field `{name}`"),
+        }
+    }
+}
+
+impl Error for LowerError {}
 
 #[cfg(test)]
 mod tests {
