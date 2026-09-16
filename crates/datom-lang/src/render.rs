@@ -39,12 +39,13 @@ impl Program {
             TypeDetails::Collection(collection) => self.push(collection.generic()),
 
             TypeDetails::Sum(sum) => {
-                if self.declared.contains(&ty.name) {
+                // Marked before its dependencies are walked, so a type that
+                // names itself stops here instead of declaring itself twice.
+                if !self.declared.insert(ty.name.clone()) {
                     return;
                 }
 
                 self.dependencies(sum);
-                self.declared.insert(ty.name.clone());
                 self.declarations.push(ty.to_string());
             }
         }
@@ -132,6 +133,12 @@ mod tests {
             render_types(&[person]),
             "type Address(city: string)\n\ntype Person(home: Address)\n"
         );
+    }
+
+    #[test]
+    fn a_recursive_type_round_trips() {
+        let (a, b) = round_trip("type Node(value: number, next: Node)\ntype List(head: Node)");
+        assert_eq!(a, b);
     }
 
     #[test]

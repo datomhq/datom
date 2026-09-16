@@ -4,7 +4,9 @@
 //! identifier `Address`, a range into the source. Nothing in the tree says
 //! whether `Address` was ever declared or what it holds. This pass resolves
 //! those names against the declarations around them and builds the [`Type`]
-//! values in [`crate::types`], where a field holds the type itself.
+//! values in [`crate::types`], where a field holds the type itself — except
+//! inside that type's own body, which isn't finished yet, where it holds the
+//! name over an empty body.
 
 use std::collections::HashMap;
 
@@ -30,14 +32,22 @@ pub(crate) fn lower(
     .run(program)
 }
 
+/// What the scope knows about a type name.
+enum Binding {
+    /// Named by a declaration whose body is still being lowered.
+    Declared,
+    /// Lowered in full.
+    Defined(Type),
+}
+
 struct Lowering<'s, 'd> {
     source: &'s str,
     diag: &'d Diagnostics,
     /// Every type declared so far by name.
-    scope: HashMap<String, Type>,
+    scope: HashMap<&'s str, Binding>,
 }
 
-impl Lowering<'_, '_> {
+impl<'s> Lowering<'s, '_> {
     fn run(&mut self, program: &Program) -> Result<Vec<Type>, CompileError> {
         let mut types = Vec::new();
 
@@ -46,19 +56,23 @@ impl Lowering<'_, '_> {
                 continue;
             };
 
-            let ty = self.type_statement(declaration)?;
-            self.scope.insert(ty.name.clone(), ty.clone());
+            let (name, ty) = self.type_statement(declaration)?;
+            self.scope.insert(name, Binding::Defined(ty.clone()));
             types.push(ty);
         }
 
         Ok(types)
     }
 
-    fn type_statement(&self, declaration: &TypeStatement) -> Result<Type, CompileError> {
+    /// Lower a declaration, returning the name it introduced alongside it.
+    fn type_statement(
+        &mut self,
+        declaration: &TypeStatement,
+    ) -> Result<(&'s str, Type), CompileError> {
         match declaration {
             TypeStatement::Single(constructor) => {
                 let name = self.declare(&constructor.name)?;
-                Ok(Type::single(&name, self.fields(&constructor.fields)?))
+                Ok((name, Type::single(name, self.fields(&constructor.fields)?)))
             }
 
             TypeStatement::Variadic((token, constructors)) => {
@@ -72,7 +86,7 @@ impl Lowering<'_, '_> {
                     ));
                 }
 
-                Ok(Type::variadic(&name, variants))
+                Ok((name, Type::variadic(name, variants)))
             }
 
             TypeStatement::InlineVariadic((token, names)) => {
@@ -83,20 +97,22 @@ impl Lowering<'_, '_> {
                     variants.push(self.type_name(type_name)?);
                 }
 
-                Ok(Type::inline_variadic(&name, variants))
+                Ok((name, Type::inline_variadic(name, variants)))
             }
         }
     }
 
-    /// The name `token` introduces, rejecting one already declared.
-    fn declare(&self, token: &Token) -> Result<String, CompileError> {
+    /// Bring the name `token` introduces into scope before its body is
+    /// lowered, so the body can name it. Rejects a name already declared.
+    fn declare(&mut self, token: &Token) -> Result<&'s str, CompileError> {
         let name = token.lexeme(self.source);
 
         if self.scope.contains_key(name) {
             return Err(self.report(LowerError::DuplicateType(name.to_string()), token));
         }
 
-        Ok(name.to_string())
+        self.scope.insert(name, Binding::Declared);
+        Ok(name)
     }
 
     /// Lower a constructor's fields.
@@ -147,7 +163,8 @@ impl Lowering<'_, '_> {
         let name = token.lexeme(self.source);
 
         match self.scope.get(name) {
-            Some(ty) => Ok(ty.clone()),
+            Some(Binding::Defined(ty)) => Ok(ty.clone()),
+            Some(Binding::Declared) => Ok(Type::single(name, Fields::new())),
             None => Err(self.report(LowerError::UnknownType(name.to_string()), token)),
         }
     }
@@ -257,11 +274,48 @@ mod tests {
     }
 
     #[test]
-    fn a_type_cannot_reference_itself() {
-        let err = lowered("type Node(next: Node)").unwrap_err();
-        // TODO: come back to this on recursive types
-        //       a field will need to hold a reference to the type
-        assert_eq!(err, "[1:17] error: Unknown type `Node`\n");
+    fn a_type_can_reference_itself() {
+        let types = lowered("type Category(name: string, children: list<Category>)").unwrap();
+
+        assert_eq!(
+            types[0].to_string(),
+            "type Category(children: list<Category>, name: string)"
+        );
+    }
+
+    #[test]
+    fn a_variant_can_reference_its_own_type() {
+        let types =
+            lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
+
+        assert_eq!(
+            types[0].to_string(),
+            "type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }"
+        );
+    }
+
+    #[test]
+    fn an_inline_variadic_can_reference_itself() {
+        let types = lowered("type Json = string | number | list<Json>;").unwrap();
+        assert_eq!(
+            types[0].to_string(),
+            "type Json = string | number | list<Json>;"
+        );
+    }
+
+    #[test]
+    fn a_self_reference_holds_the_name_over_an_empty_body() {
+        let types = lowered("type Node(value: number, next: Node)").unwrap();
+        assert_eq!(
+            single(&types[0])["next"],
+            Type::single("Node", Fields::new())
+        );
+    }
+
+    #[test]
+    fn a_later_type_holds_the_full_definition_of_a_recursive_one() {
+        let types = lowered("type Node(value: number, next: Node)\ntype List(head: Node)").unwrap();
+        assert_eq!(single(&types[1])["head"], types[0]);
     }
 
     #[test]
