@@ -3,10 +3,8 @@
 //! [`crate::parser`] produces a tree of tokens — a field's type is the
 //! identifier `Address`, a range into the source. Nothing in the tree says
 //! whether `Address` was ever declared or what it holds. This pass resolves
-//! those names against the declarations around them and builds the [`Type`]
-//! values in [`crate::types`], where a field holds the type itself — except
-//! inside that type's own body, which isn't finished yet, where it holds the
-//! name over an empty body.
+//! those names against the declarations around them and fills in the
+//! [`TypeTable`] in [`crate::types`], where a field holds the id of its type.
 
 use std::collections::HashMap;
 
@@ -15,7 +13,7 @@ use crate::{
     error::{CompileError, LowerError},
     parser::{Program, Statement, TypeFields, TypeName, TypeStatement},
     scanner::{Keyword, Token, TokenKind},
-    types::{Fields, Type},
+    types::{Fields, Sum, TypeId, TypeTable},
 };
 
 /// Lower every type declaration in `program`, in declaration order.
@@ -23,60 +21,49 @@ pub(crate) fn lower(
     source: &str,
     program: &Program,
     diagnostics: &Diagnostics,
-) -> Result<Vec<Type>, CompileError> {
+) -> Result<TypeTable, CompileError> {
     Lowering {
         source,
         diag: diagnostics,
         scope: HashMap::new(),
+        table: TypeTable::new(),
     }
     .run(program)
-}
-
-/// What the scope knows about a type name.
-enum Binding {
-    /// Named by a declaration whose body is still being lowered.
-    Declared,
-    /// Lowered in full.
-    Defined(Type),
 }
 
 struct Lowering<'s, 'd> {
     source: &'s str,
     diag: &'d Diagnostics,
     /// Every type declared so far by name.
-    scope: HashMap<&'s str, Binding>,
+    scope: HashMap<&'s str, TypeId>,
+    table: TypeTable,
 }
 
 impl<'s> Lowering<'s, '_> {
-    fn run(&mut self, program: &Program) -> Result<Vec<Type>, CompileError> {
-        let mut types = Vec::new();
-
+    fn run(mut self, program: &Program) -> Result<TypeTable, CompileError> {
         for statement in &program.statements {
             let Statement::Type(declaration) = statement else {
                 continue;
             };
 
-            let (name, ty) = self.type_statement(declaration)?;
-            self.scope.insert(name, Binding::Defined(ty.clone()));
-            types.push(ty);
+            self.type_statement(declaration)?;
         }
 
-        Ok(types)
+        Ok(self.table.finish())
     }
 
-    /// Lower a declaration, returning the name it introduced alongside it.
-    fn type_statement(
-        &mut self,
-        declaration: &TypeStatement,
-    ) -> Result<(&'s str, Type), CompileError> {
-        match declaration {
+    /// Lower a declaration into the id its name was reserved.
+    fn type_statement(&mut self, declaration: &TypeStatement) -> Result<(), CompileError> {
+        let (id, sum) = match declaration {
             TypeStatement::Single(constructor) => {
-                let name = self.declare(&constructor.name)?;
-                Ok((name, Type::single(name, self.fields(&constructor.fields)?)))
+                let id = self.declare(&constructor.name)?;
+                let fields = self.fields(&constructor.fields)?;
+
+                (id, Sum::Single(fields))
             }
 
             TypeStatement::Variadic((token, constructors)) => {
-                let name = self.declare(token)?;
+                let id = self.declare(token)?;
 
                 let mut variants = Vec::with_capacity(constructors.len());
                 for constructor in constructors {
@@ -86,37 +73,41 @@ impl<'s> Lowering<'s, '_> {
                     ));
                 }
 
-                Ok((name, Type::variadic(name, variants)))
+                (id, Sum::Variadic(variants))
             }
 
             TypeStatement::InlineVariadic((token, names)) => {
-                let name = self.declare(token)?;
+                let id = self.declare(token)?;
 
                 let mut variants = Vec::with_capacity(names.len());
                 for type_name in names {
                     variants.push(self.type_name(type_name)?);
                 }
 
-                Ok((name, Type::inline_variadic(name, variants)))
+                (id, Sum::InlineVariadic(variants))
             }
-        }
+        };
+
+        self.table.define(id, sum);
+        Ok(())
     }
 
     /// Bring the name `token` introduces into scope before its body is
     /// lowered, so the body can name it. Rejects a name already declared.
-    fn declare(&mut self, token: &Token) -> Result<&'s str, CompileError> {
+    fn declare(&mut self, token: &Token) -> Result<TypeId, CompileError> {
         let name = token.lexeme(self.source);
 
         if self.scope.contains_key(name) {
             return Err(self.report(LowerError::DuplicateType(name.to_string()), token));
         }
 
-        self.scope.insert(name, Binding::Declared);
-        Ok(name)
+        let id = self.table.declare(name);
+        self.scope.insert(name, id);
+        Ok(id)
     }
 
     /// Lower a constructor's fields.
-    fn fields(&self, fields: &TypeFields) -> Result<Fields, CompileError> {
+    fn fields(&mut self, fields: &TypeFields) -> Result<Fields, CompileError> {
         let mut lowered = Fields::with_capacity(fields.len());
 
         for field in fields {
@@ -131,11 +122,13 @@ impl<'s> Lowering<'s, '_> {
         Ok(lowered)
     }
 
-    /// Resolve a written type name to the type it denotes.
-    fn type_name(&self, name: &TypeName) -> Result<Type, CompileError> {
+    /// Resolve a written type name to the id it denotes.
+    fn type_name(&mut self, name: &TypeName) -> Result<TypeId, CompileError> {
         match name {
             TypeName::Concrete(token) => match token.kind {
-                TokenKind::Keyword(Keyword::Primitive(primitive)) => Ok(Type::primitive(primitive)),
+                TokenKind::Keyword(Keyword::Primitive(primitive)) => {
+                    Ok(self.table.primitive(primitive))
+                }
                 // Anything else in this position is written as a name, and
                 // has to have been declared under it.
                 _ => self.declared(token),
@@ -153,18 +146,18 @@ impl<'s> Lowering<'s, '_> {
                     ));
                 };
 
-                Ok(Type::collection(kind, self.type_name(over)?))
+                let inner = self.type_name(over)?;
+                Ok(self.table.collection(kind, inner))
             }
         }
     }
 
-    /// The type `token` names, which a declaration must have introduced.
-    fn declared(&self, token: &Token) -> Result<Type, CompileError> {
+    /// The id `token` names, which a declaration must have introduced.
+    fn declared(&self, token: &Token) -> Result<TypeId, CompileError> {
         let name = token.lexeme(self.source);
 
         match self.scope.get(name) {
-            Some(Binding::Defined(ty)) => Ok(ty.clone()),
-            Some(Binding::Declared) => Ok(Type::single(name, Fields::new())),
+            Some(id) => Ok(*id),
             None => Err(self.report(LowerError::UnknownType(name.to_string()), token)),
         }
     }
@@ -300,15 +293,6 @@ mod tests {
         assert_eq!(
             types[0].to_string(),
             "type Json = string | number | list<Json>;"
-        );
-    }
-
-    #[test]
-    fn a_self_reference_holds_the_name_over_an_empty_body() {
-        let types = lowered("type Node(value: number, next: Node)").unwrap();
-        assert_eq!(
-            single(&types[0])["next"],
-            Type::single("Node", Fields::new())
         );
     }
 

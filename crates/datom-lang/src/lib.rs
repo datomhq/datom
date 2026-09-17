@@ -9,7 +9,7 @@ pub(crate) mod parser;
 pub(crate) mod render;
 pub(crate) mod scanner;
 pub(crate) mod tree;
-pub(crate) mod types;
+pub mod types;
 
 pub use render::render_types;
 
@@ -47,8 +47,7 @@ pub fn parse(source: &str) -> Result<String, CompileFailure> {
 }
 
 /// Parse `source` and lower its declarations into the semantic type model.
-#[allow(private_interfaces)]
-pub fn types(source: &str) -> Result<Vec<types::Type>, CompileFailure> {
+pub fn types(source: &str) -> Result<types::TypeTable, CompileFailure> {
     let diag = diagnostics::Diagnostics::new();
     let tokens = scanner::scan(source, &diag);
 

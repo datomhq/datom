@@ -1,7 +1,4 @@
-//! The datom type system: the semantic model a program's types lower into.
-//!
-//! Distinct from the syntax tree in [`crate::parser`] — these describe what a
-//! type *is*, not how it was written.
+//! The datom type system.
 
 use std::{
     collections::HashMap,
@@ -10,7 +7,7 @@ use std::{
 
 /// A primitive type within the datom type system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Primitive {
+pub enum Primitive {
     Number,
     String,
     Bool,
@@ -32,7 +29,7 @@ impl Display for Primitive {
 
 /// A collection type within the datom type system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Collection {
+pub enum Collection {
     List,
     Map,
     Set,
@@ -50,150 +47,260 @@ impl Display for Collection {
     }
 }
 
+/// An opaque id for one type in a [`TypeTable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeId(u32);
+
+impl TypeId {
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// The primitives, in the order every table seeds them.
+const PRIMITIVES: [Primitive; 4] = [
+    Primitive::Number,
+    Primitive::String,
+    Primitive::Bool,
+    Primitive::DateTime,
+];
+
+/// Every type a program mentions, addressed by [`TypeId`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeTable {
+    /// Every type: primitives, collections, declarations.
+    types: Vec<Type>,
+    /// What the source declared, in order.
+    declared: Vec<TypeId>,
+}
+
+impl Default for TypeTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeTable {
+    /// A table holding nothing but the primitives.
+    pub fn new() -> Self {
+        let types = PRIMITIVES
+            .into_iter()
+            .map(|primitive| Type {
+                name: primitive.to_string(),
+                details: Some(TypeDetails::Primitive(primitive)),
+            })
+            .collect();
+
+        Self {
+            types,
+            declared: Vec::new(),
+        }
+    }
+
+    /// The id of a primitive, seeded before anything else is in the table.
+    pub fn primitive(&self, primitive: Primitive) -> TypeId {
+        let index = match primitive {
+            Primitive::Number => 0,
+            Primitive::String => 1,
+            Primitive::Bool => 2,
+            Primitive::DateTime => 3,
+        };
+
+        TypeId(index)
+    }
+
+    /// The id of `kind` over `inner`, interned.
+    pub fn collection(&mut self, kind: Collection, inner: TypeId) -> TypeId {
+        if let Some(id) = self.interned(kind, inner) {
+            return id;
+        }
+
+        let name = format!("{kind}<{}>", self.name_of(inner));
+        self.push(Type {
+            name,
+            details: Some(TypeDetails::Collection(kind, inner)),
+        })
+    }
+
+    /// Take an id for a declared type.
+    pub fn declare(&mut self, name: &str) -> TypeId {
+        let id = self.push(Type {
+            name: name.to_string(),
+            details: None,
+        });
+
+        self.declared.push(id);
+        id
+    }
+
+    /// Give a declared type the body it was reserved for.
+    pub fn define(&mut self, id: TypeId, sum: Sum) {
+        self.types[id.index()].details = Some(TypeDetails::Sum(sum));
+    }
+
+    /// Every declared type has a body; panics naming the first that does not.
+    pub fn finish(self) -> Self {
+        for id in self.iter() {
+            let entry = &self.types[id.index()];
+            assert!(
+                entry.details.is_some(),
+                "`{}` was declared but never defined",
+                entry.name
+            );
+        }
+
+        self
+    }
+
+    /// The type `id` addresses.
+    pub fn get(&self, id: TypeId) -> &Type {
+        &self.types[id.index()]
+    }
+
+    /// The name `id` is written under — `number`, `list<Category>`, `Person`.
+    pub fn name_of(&self, id: TypeId) -> &str {
+        &self.types[id.index()].name
+    }
+
+    /// The types the source declared, in declaration order.
+    pub fn iter(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.declared.iter().copied()
+    }
+
+    /// The id already holding `kind` over `inner`, if some field asked first.
+    fn interned(&self, kind: Collection, inner: TypeId) -> Option<TypeId> {
+        self.types
+            .iter()
+            .position(|ty| matches!(ty.details, Some(TypeDetails::Collection(k, i)) if k == kind && i == inner))
+            .map(|index| TypeId(index as u32))
+    }
+
+    fn push(&mut self, ty: Type) -> TypeId {
+        let id = TypeId(self.types.len() as u32);
+        self.types.push(ty);
+        id
+    }
+}
+
 /// The map of fields and their types for a datom sum type.
-pub(crate) type Fields = HashMap<String, Type>;
+pub type Fields = HashMap<String, TypeId>;
 
 /// A sum type within the datom type system.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Sum {
+pub enum Sum {
     /// A single sum type has only a single variant, implicitly named the same as the overall type.
     Single(Fields),
     /// A variadic sum type has multiple variants, each with a name and different fields.
     Variadic(Vec<(String, Fields)>),
     /// An inline variadic sum has type has multiple variants, each its own field.
-    InlineVariadic(Vec<Type>),
+    InlineVariadic(Vec<TypeId>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CollectionDetails {
-    kind: Collection,
-    generic: Box<Type>,
-}
-
-impl CollectionDetails {
-    pub(crate) fn kind(&self) -> Collection {
-        self.kind
-    }
-
-    pub(crate) fn generic(&self) -> &Type {
-        &self.generic
-    }
-}
-
-impl Display for CollectionDetails {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}<{}>", self.kind, self.generic.name)
+impl Sum {
+    /// Print the body of a declaration — the fields, variants or alternatives
+    /// that follow its name.
+    pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
+        Displayed { value: self, table }
     }
 }
 
 /// A type within the datom type system.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Type {
+pub struct Type {
     pub name: String,
-    pub details: TypeDetails,
+    details: Option<TypeDetails>,
 }
 
 impl Type {
-    /// A primitive type, named for the primitive itself.
-    pub(crate) fn primitive(primitive: Primitive) -> Self {
-        Self {
-            name: primitive.to_string(),
-            details: TypeDetails::Primitive(primitive),
-        }
+    /// What the type is.
+    pub fn details(&self) -> &TypeDetails {
+        self.details
+            .as_ref()
+            .unwrap_or_else(|| panic!("`{}` was declared but never defined", self.name))
     }
 
-    /// A single sum type.
-    pub(crate) fn single(name: &str, fields: Fields) -> Self {
-        Self::of(name, Sum::Single(fields))
-    }
-
-    /// A variadic sum type — several named variants, each with its own fields.
-    pub(crate) fn variadic(name: &str, variants: Vec<(String, Fields)>) -> Self {
-        Self::of(name, Sum::Variadic(variants))
-    }
-
-    /// An inline variadic sum type — several variants, each an existing type.
-    pub(crate) fn inline_variadic(name: &str, variants: Vec<Type>) -> Self {
-        Self::of(name, Sum::InlineVariadic(variants))
-    }
-
-    pub(crate) fn collection(kind: Collection, generic: Type) -> Self {
-        let details = CollectionDetails {
-            kind,
-            generic: Box::new(generic),
-        };
-
-        Self {
-            name: details.to_string(),
-            details: TypeDetails::Collection(details),
-        }
-    }
-
-    fn of(name: &str, sum: Sum) -> Self {
-        Self {
-            name: name.to_string(),
-            details: TypeDetails::Sum(sum),
-        }
-    }
-}
-
-/// Prints a type as the declaration that introduces it — `type Person(name: string)`.
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match &self.details {
-            TypeDetails::Primitive(_) => f.write_str(&self.name),
-            TypeDetails::Sum(sum) => write!(f, "type {}{sum}", self.name),
-            TypeDetails::Collection(collection) => write!(f, "{collection}"),
-        }
+    /// Print the declaration that introduces this type — `type Person(name: string)`.
+    pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
+        Displayed { value: self, table }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TypeDetails {
+pub enum TypeDetails {
     Primitive(Primitive),
     Sum(Sum),
-    Collection(CollectionDetails),
+    Collection(Collection, TypeId),
 }
 
-impl Display for TypeDetails {
-    /// Pre-order DFS traversal of the type tree.
-    /// Each node writes its own fields before descending.
+impl TypeDetails {
+    /// Print what the type is, without the declaration around it.
+    pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
+        Displayed { value: self, table }
+    }
+}
+
+/// Something printable paired with the table its ids address.
+struct Displayed<'a, T> {
+    value: &'a T,
+    table: &'a TypeTable,
+}
+
+/// Prints a type as the declaration that introduces it — `type Person(name: string)`.
+impl Display for Displayed<'_, Type> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Primitive(primitive) => write!(f, "{primitive}"),
-            Self::Sum(sum) => write!(f, "{sum}"),
-            Self::Collection(collection) => write!(f, "{collection}"),
+        let details = self.value.details();
+
+        match details {
+            TypeDetails::Primitive(_) => f.write_str(&self.value.name),
+            TypeDetails::Sum(sum) => {
+                write!(f, "type {}{}", self.value.name, sum.display(self.table))
+            }
+            TypeDetails::Collection(..) => details.display(self.table).fmt(f),
         }
     }
 }
 
-impl Display for Sum {
+impl Display for Displayed<'_, TypeDetails> {
+    /// Pre-order DFS traversal of the type tree.
+    /// Each node writes its own fields before descending.
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
+        match self.value {
+            TypeDetails::Primitive(primitive) => write!(f, "{primitive}"),
+            TypeDetails::Sum(sum) => sum.display(self.table).fmt(f),
+            TypeDetails::Collection(kind, inner) => {
+                write!(f, "{kind}<{}>", self.table.name_of(*inner))
+            }
+        }
+    }
+}
+
+impl Display for Displayed<'_, Sum> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.value {
             // e.g., `(id: number, name: string)`
-            Self::Single(fields) => write_fields(f, fields),
+            Sum::Single(fields) => write_fields(f, fields, self.table),
 
             // e.g., `{ Employee(name: string), Robot(id: number) }`
-            Self::Variadic(variants) => {
+            Sum::Variadic(variants) => {
                 f.write_str(" { ")?;
                 for (i, (name, fields)) in variants.iter().enumerate() {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
                     f.write_str(name)?;
-                    write_fields(f, fields)?;
+                    write_fields(f, fields, self.table)?;
                 }
                 f.write_str(" }")
             }
 
             // e.g., ` = Person | Robot`
-            Self::InlineVariadic(tys) => {
+            Sum::InlineVariadic(ids) => {
                 f.write_str(" = ")?;
-                for (i, ty) in tys.iter().enumerate() {
+                for (i, id) in ids.iter().enumerate() {
                     if i > 0 {
                         f.write_str(" | ")?;
                     }
-                    f.write_str(&ty.name)?;
+                    f.write_str(self.table.name_of(*id))?;
                 }
                 f.write_str(";")?;
                 Ok(())
@@ -203,7 +310,7 @@ impl Display for Sum {
 }
 
 /// Writes a parenthesised list of fields.
-fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
+fn write_fields(f: &mut Formatter<'_>, fields: &Fields, table: &TypeTable) -> fmt::Result {
     let mut names: Vec<&str> = fields.keys().map(String::as_str).collect();
     names.sort_unstable();
 
@@ -212,11 +319,10 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
         if i > 0 {
             f.write_str(", ")?;
         }
-        write!(f, "{name}: {}", fields[name].name)?;
+        write!(f, "{name}: {}", table.name_of(fields[name]))?;
     }
     f.write_str(")")
 }
-
 #[cfg(test)]
 mod tests {
     use std::vec;
@@ -436,5 +542,17 @@ mod tests {
         let other = Type::variadic("Major", variants("Declared", "Undeclared"));
 
         assert_ne!(one, other);
+    }
+
+    #[test]
+    fn every_primitive_is_seeded_at_the_id_it_answers_with() {
+        let table = TypeTable::new();
+
+        for primitive in PRIMITIVES {
+            assert_eq!(
+                table.get(table.primitive(primitive)).details(),
+                &TypeDetails::Primitive(primitive)
+            );
+        }
     }
 }
