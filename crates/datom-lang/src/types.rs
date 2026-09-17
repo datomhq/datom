@@ -111,14 +111,20 @@ impl TypeTable {
 
     /// The id of `kind` over `inner`, interned.
     pub fn collection(&mut self, kind: Collection, inner: TypeId) -> TypeId {
-        if let Some(id) = self.interned(kind, inner) {
-            return id;
+        let details = TypeDetails::Collection(kind, inner);
+
+        if let Some(index) = self
+            .types
+            .iter()
+            .position(|ty| ty.details.as_ref() == Some(&details))
+        {
+            return TypeId(index as u32);
         }
 
         let name = format!("{kind}<{}>", self.name_of(inner));
         self.push(Type {
             name,
-            details: Some(TypeDetails::Collection(kind, inner)),
+            details: Some(details),
         })
     }
 
@@ -141,12 +147,7 @@ impl TypeTable {
     /// Every declared type has a body; panics naming the first that does not.
     pub fn finish(self) -> Self {
         for id in self.iter() {
-            let entry = &self.types[id.index()];
-            assert!(
-                entry.details.is_some(),
-                "`{}` was declared but never defined",
-                entry.name
-            );
+            self.get(id).details();
         }
 
         self
@@ -165,14 +166,6 @@ impl TypeTable {
     /// The types the source declared, in declaration order.
     pub fn iter(&self) -> impl Iterator<Item = TypeId> + '_ {
         self.declared.iter().copied()
-    }
-
-    /// The id already holding `kind` over `inner`, if some field asked first.
-    fn interned(&self, kind: Collection, inner: TypeId) -> Option<TypeId> {
-        self.types
-            .iter()
-            .position(|ty| matches!(ty.details, Some(TypeDetails::Collection(k, i)) if k == kind && i == inner))
-            .map(|index| TypeId(index as u32))
     }
 
     fn push(&mut self, ty: Type) -> TypeId {
@@ -196,14 +189,6 @@ pub enum Sum {
     InlineVariadic(Vec<TypeId>),
 }
 
-impl Sum {
-    /// Print the body of a declaration — the fields, variants or alternatives
-    /// that follow its name.
-    pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
-        Displayed { value: self, table }
-    }
-}
-
 /// A type within the datom type system.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Type {
@@ -221,7 +206,7 @@ impl Type {
 
     /// Print the declaration that introduces this type — `type Person(name: string)`.
     pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
-        Displayed { value: self, table }
+        Displayed { ty: self, table }
     }
 }
 
@@ -232,51 +217,23 @@ pub enum TypeDetails {
     Collection(Collection, TypeId),
 }
 
-impl TypeDetails {
-    /// Print what the type is, without the declaration around it.
-    pub fn display<'a>(&'a self, table: &'a TypeTable) -> impl Display + 'a {
-        Displayed { value: self, table }
-    }
-}
-
-/// Something printable paired with the table its ids address.
-struct Displayed<'a, T> {
-    value: &'a T,
+/// A type paired with the table its ids address.
+struct Displayed<'a> {
+    ty: &'a Type,
     table: &'a TypeTable,
 }
 
 /// Prints a type as the declaration that introduces it — `type Person(name: string)`.
-impl Display for Displayed<'_, Type> {
+impl Display for Displayed<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let details = self.value.details();
+        let TypeDetails::Sum(sum) = self.ty.details() else {
+            // A primitive or a collection is written as its own name.
+            return f.write_str(&self.ty.name);
+        };
 
-        match details {
-            TypeDetails::Primitive(_) => f.write_str(&self.value.name),
-            TypeDetails::Sum(sum) => {
-                write!(f, "type {}{}", self.value.name, sum.display(self.table))
-            }
-            TypeDetails::Collection(..) => details.display(self.table).fmt(f),
-        }
-    }
-}
+        write!(f, "type {}", self.ty.name)?;
 
-impl Display for Displayed<'_, TypeDetails> {
-    /// Pre-order DFS traversal of the type tree.
-    /// Each node writes its own fields before descending.
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.value {
-            TypeDetails::Primitive(primitive) => write!(f, "{primitive}"),
-            TypeDetails::Sum(sum) => sum.display(self.table).fmt(f),
-            TypeDetails::Collection(kind, inner) => {
-                write!(f, "{kind}<{}>", self.table.name_of(*inner))
-            }
-        }
-    }
-}
-
-impl Display for Displayed<'_, Sum> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.value {
+        match sum {
             // e.g., `(id: number, name: string)`
             Sum::Single(fields) => write_fields(f, fields, self.table),
 
@@ -293,7 +250,7 @@ impl Display for Displayed<'_, Sum> {
                 f.write_str(" }")
             }
 
-            // e.g., ` = Person | Robot`
+            // e.g., ` = Person | Robot;`
             Sum::InlineVariadic(ids) => {
                 f.write_str(" = ")?;
                 for (i, id) in ids.iter().enumerate() {
@@ -302,8 +259,7 @@ impl Display for Displayed<'_, Sum> {
                     }
                     f.write_str(self.table.name_of(*id))?;
                 }
-                f.write_str(";")?;
-                Ok(())
+                f.write_str(";")
             }
         }
     }
@@ -325,224 +281,127 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields, table: &TypeTable) -> fm
 }
 #[cfg(test)]
 mod tests {
-    use std::vec;
-
     use super::*;
 
-    /// Build a [`Fields`] map from `(name, type)` pairs.
-    fn fields<const N: usize>(entries: [(&str, Type); N]) -> Fields {
+    /// Build a [`Fields`] map from `(name, id)` pairs.
+    fn fields<const N: usize>(entries: [(&str, TypeId); N]) -> Fields {
         entries
             .into_iter()
-            .map(|(name, ty)| (String::from(name), ty))
+            .map(|(name, id)| (String::from(name), id))
             .collect()
     }
 
-    #[test]
-    fn a_primitive_type_prints_as_the_primitive() {
-        assert_eq!(
-            TypeDetails::Primitive(Primitive::DateTime).to_string(),
-            "datetime"
-        );
+    /// Declare `name` and give it `sum` in one step.
+    fn ty(table: &mut TypeTable, name: &str, sum: Sum) -> TypeId {
+        let id = table.declare(name);
+        table.define(id, sum);
+        id
     }
+
+    /// How `id` prints as a declaration.
+    fn rendered(table: &TypeTable, id: TypeId) -> String {
+        table.get(id).display(table).to_string()
+    }
+
+    // Printing: one case per `Sum` shape. The exhaustive coverage lives in
+    // `render::tests::the_tour_renders_as_source`, against a golden file.
 
     #[test]
     fn a_single_sum_prints_its_fields() {
-        let cell = Type::single(
+        let mut table = TypeTable::new();
+        let boolean = table.primitive(Primitive::Bool);
+
+        let cell = ty(
+            &mut table,
             "Cell",
-            fields([
-                ("nucleus", Type::primitive(Primitive::Bool)),
-                ("wall", Type::primitive(Primitive::Bool)),
-            ]),
+            Sum::Single(fields([("nucleus", boolean), ("wall", boolean)])),
         );
-        assert_eq!(cell.to_string(), "type Cell(nucleus: bool, wall: bool)");
+
+        assert_eq!(
+            rendered(&table, cell),
+            "type Cell(nucleus: bool, wall: bool)"
+        );
     }
 
     #[test]
     fn a_variadic_sum_prints_every_variant() {
-        let person = Type::variadic(
+        let mut table = TypeTable::new();
+        let number = table.primitive(Primitive::Number);
+        let boolean = table.primitive(Primitive::Bool);
+
+        let person = ty(
+            &mut table,
             "Person",
-            vec![
-                (
-                    String::from("Student"),
-                    fields([("id", Type::primitive(Primitive::Number))]),
-                ),
-                (
-                    String::from("Professor"),
-                    fields([("tenured", Type::primitive(Primitive::Bool))]),
-                ),
-            ],
+            Sum::Variadic(vec![
+                (String::from("Student"), fields([("id", number)])),
+                (String::from("Professor"), fields([("tenured", boolean)])),
+            ]),
         );
 
         assert_eq!(
-            person.to_string(),
+            rendered(&table, person),
             "type Person { Student(id: number), Professor(tenured: bool) }"
         );
     }
 
     #[test]
-    fn nested_sums_recurse_down_to_their_primitives() {
-        let address = Type::single(
-            "Address",
-            fields([("city", Type::primitive(Primitive::String))]),
-        );
+    fn an_inline_variadic_prints_the_names_it_unions() {
+        let mut table = TypeTable::new();
+        let string = table.primitive(Primitive::String);
+        let number = table.primitive(Primitive::Number);
 
-        let person = Type::single(
+        let person = ty(
+            &mut table,
             "Person",
-            fields([
-                ("home", address.clone()),
-                ("id", Type::primitive(Primitive::Number)),
-            ]),
+            Sum::Single(fields([("name", string)])),
+        );
+        let robot = ty(&mut table, "Robot", Sum::Single(fields([("id", number)])));
+        let employee = ty(
+            &mut table,
+            "Employee",
+            Sum::InlineVariadic(vec![person, robot]),
         );
 
         assert_eq!(
-            format!("{address}\n{person}"),
-            "type Address(city: string)\ntype Person(home: Address, id: number)"
+            rendered(&table, employee),
+            "type Employee = Person | Robot;"
         );
-    }
-
-    #[test]
-    fn a_variant_may_nest_a_sum_too() {
-        let major = Type::variadic(
-            "Major",
-            vec![
-                (String::from("Undeclared"), fields([])),
-                (
-                    String::from("Declared"),
-                    fields([("name", Type::primitive(Primitive::String))]),
-                ),
-            ],
-        );
-
-        let student = Type::single("Student", fields([("major", major.clone())]));
-
-        assert_eq!(
-            format!("{major}\n{student}"),
-            "type Major { Undeclared(), Declared(name: string) }\ntype Student(major: Major)"
-        );
-    }
-
-    #[test]
-    fn an_inline_variadic_prints_references() {
-        let person = Type::single(
-            "Person",
-            fields([("name", Type::primitive(Primitive::String))]),
-        );
-
-        let robot = Type::single(
-            "Robot",
-            fields([("id", Type::primitive(Primitive::Number))]),
-        );
-
-        let employee = Type::inline_variadic("Employee", vec![person, robot]);
-
-        assert_eq!(employee.to_string(), "type Employee = Person | Robot;");
-    }
-
-    #[test]
-    fn an_inline_variadic_may_mix_primitives_and_singles() {
-        let badge = Type::single(
-            "Badge",
-            fields([("serial", Type::primitive(Primitive::Number))]),
-        );
-
-        let id = Type::inline_variadic(
-            "Id",
-            vec![
-                Type::primitive(Primitive::String),
-                Type::primitive(Primitive::Number),
-                badge,
-            ],
-        );
-
-        assert_eq!(id.to_string(), "type Id = string | number | Badge;");
-    }
-
-    #[test]
-    fn fields_print_in_a_stable_order() {
-        let ty = Type::single(
-            "Zoo",
-            fields([
-                ("zebra", Type::primitive(Primitive::Bool)),
-                ("apple", Type::primitive(Primitive::Bool)),
-                ("middle", Type::primitive(Primitive::Number)),
-            ]),
-        );
-
-        assert_eq!(
-            ty.to_string(),
-            "type Zoo(apple: bool, middle: number, zebra: bool)"
-        );
-    }
-
-    #[test]
-    fn collections() {
-        let ty = Type::collection(Collection::List, Type::primitive(Primitive::Number));
-        assert_eq!(ty.to_string(), "list<number>");
     }
 
     #[test]
     fn nested_collections_recurse() {
-        let inner = Type::collection(Collection::List, Type::primitive(Primitive::Number));
-        let ty = Type::collection(Collection::List, inner);
+        let mut table = TypeTable::new();
+        let number = table.primitive(Primitive::Number);
 
-        assert_eq!(ty.to_string(), "list<list<number>>");
+        let inner = table.collection(Collection::List, number);
+        let outer = table.collection(Collection::List, inner);
+
+        assert_eq!(rendered(&table, outer), "list<list<number>>");
     }
 
     #[test]
-    fn collections_as_fields() {
-        let collection = Type::collection(Collection::List, Type::primitive(Primitive::Bool));
-        let ty = Type::single("Arena", fields([("items", collection)]));
+    fn fields_print_in_a_stable_order() {
+        let mut table = TypeTable::new();
+        let boolean = table.primitive(Primitive::Bool);
+        let number = table.primitive(Primitive::Number);
 
-        assert_eq!(ty.to_string(), "type Arena(items: list<bool>)")
-    }
-
-    #[test]
-    fn collections_print_sums() {
-        let address = Type::single(
-            "Address",
-            fields([("city", Type::primitive(Primitive::String))]),
-        );
-
-        let ty = Type::collection(Collection::List, address);
-
-        assert_eq!(ty.to_string(), "list<Address>");
-    }
-
-    #[test]
-    fn fields_compare_without_regard_to_insertion_order() {
-        let one = Type::single(
+        let zoo = ty(
+            &mut table,
             "Zoo",
-            fields([
-                ("zebra", Type::primitive(Primitive::Bool)),
-                ("apple", Type::primitive(Primitive::Bool)),
-            ]),
+            Sum::Single(fields([
+                ("zebra", boolean),
+                ("apple", boolean),
+                ("middle", number),
+            ])),
         );
 
-        let other = Type::single(
-            "Zoo",
-            fields([
-                ("apple", Type::primitive(Primitive::Bool)),
-                ("zebra", Type::primitive(Primitive::Bool)),
-            ]),
+        assert_eq!(
+            rendered(&table, zoo),
+            "type Zoo(apple: bool, middle: number, zebra: bool)"
         );
-
-        assert_eq!(one, other);
     }
 
-    #[test]
-    fn variant_order_is_significant() {
-        let variants = |first: &str, second: &str| {
-            vec![
-                (String::from(first), fields([])),
-                (String::from(second), fields([])),
-            ]
-        };
-
-        let one = Type::variadic("Major", variants("Undeclared", "Declared"));
-        let other = Type::variadic("Major", variants("Declared", "Undeclared"));
-
-        assert_ne!(one, other);
-    }
+    // The table itself, which the golden file cannot reach.
 
     #[test]
     fn every_primitive_is_seeded_at_the_id_it_answers_with() {
@@ -554,5 +413,78 @@ mod tests {
                 &TypeDetails::Primitive(primitive)
             );
         }
+    }
+
+    #[test]
+    fn a_collection_interns_on_its_kind_and_element() {
+        let mut table = TypeTable::new();
+        let number = table.primitive(Primitive::Number);
+        let string = table.primitive(Primitive::String);
+
+        let list = table.collection(Collection::List, number);
+
+        assert_eq!(table.collection(Collection::List, number), list);
+        assert_ne!(table.collection(Collection::Set, number), list);
+        assert_ne!(table.collection(Collection::List, string), list);
+    }
+
+    #[test]
+    fn a_declaration_never_interns() {
+        let mut table = TypeTable::new();
+        let boolean = table.primitive(Primitive::Bool);
+
+        let a = ty(&mut table, "A", Sum::Single(fields([("x", boolean)])));
+        let b = ty(&mut table, "B", Sum::Single(fields([("x", boolean)])));
+
+        // Same body, different types: equality is nominal.
+        assert_ne!(a, b);
+        // Even the same name takes a fresh id — the scope, not the table,
+        // is what rejects a duplicate declaration.
+        assert_ne!(table.declare("A"), a);
+    }
+
+    #[test]
+    fn only_declared_types_are_iterated() {
+        let mut table = TypeTable::new();
+        let number = table.primitive(Primitive::Number);
+        let cells = table.collection(Collection::List, number);
+
+        ty(&mut table, "Grid", Sum::Single(fields([("cells", cells)])));
+
+        // Primitives and `list<number>` are in the table, but nothing
+        // declared them, so nothing may render them as declarations.
+        let names: Vec<&str> = table.iter().map(|id| table.name_of(id)).collect();
+        assert_eq!(names, ["Grid"]);
+    }
+
+    #[test]
+    fn a_name_is_readable_before_its_body_arrives() {
+        let mut table = TypeTable::new();
+        let category = table.declare("Category");
+
+        // Interning `list<Category>` while `Category` is still being lowered
+        // needs its name already readable.
+        let children = table.collection(Collection::List, category);
+        assert_eq!(table.name_of(children), "list<Category>");
+
+        let string = table.primitive(Primitive::String);
+        table.define(
+            category,
+            Sum::Single(fields([("name", string), ("children", children)])),
+        );
+
+        assert_eq!(
+            rendered(&table, category),
+            "type Category(children: list<Category>, name: string)"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "`Ghost` was declared but never defined")]
+    fn finishing_with_a_declaration_that_has_no_body_panics() {
+        let mut table = TypeTable::new();
+        table.declare("Ghost");
+
+        table.finish();
     }
 }

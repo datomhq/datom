@@ -10,16 +10,11 @@ use crate::types::TypeTable;
 ///
 /// One declaration per type, blank-line separated, in declaration order.
 pub fn render_types(table: &TypeTable) -> String {
-    let declarations: Vec<String> = table
+    table
         .iter()
-        .map(|id| table.get(id).display(table).to_string())
-        .collect();
-
-    if declarations.is_empty() {
-        return String::new();
-    }
-
-    format!("{}\n", declarations.join("\n\n"))
+        .map(|id| format!("{}\n", table.get(id).display(table)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

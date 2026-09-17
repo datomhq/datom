@@ -177,11 +177,11 @@ mod tests {
     use super::*;
     use crate::{
         parser, scanner,
-        types::{Collection, Primitive, Sum, TypeDetails},
+        types::{Collection, Primitive, TypeDetails},
     };
 
     /// Scan, parse and lower `source`.
-    fn lowered(source: &str) -> Result<Vec<Type>, String> {
+    fn lowered(source: &str) -> Result<TypeTable, String> {
         let diag = Diagnostics::new();
         let tokens = scanner::scan(source, &diag);
 
@@ -190,19 +190,44 @@ mod tests {
             .map_err(|_| diag.render(source))
     }
 
+    /// The id declared under `name`, or a panic.
+    fn nominal(table: &TypeTable, name: &str) -> TypeId {
+        table
+            .iter()
+            .find(|id| table.name_of(*id) == name)
+            .unwrap_or_else(|| panic!("no type named `{name}`"))
+    }
+
     /// The single sum's fields, or a panic naming what was found instead.
-    fn single(ty: &Type) -> &Fields {
-        match &ty.details {
+    fn single(table: &TypeTable, id: TypeId) -> &Fields {
+        match table.get(id).details() {
             TypeDetails::Sum(Sum::Single(fields)) => fields,
             other => panic!("expected a single sum, found {other:?}"),
         }
     }
 
+    /// A variadic sum's named variant, or a panic naming what was found instead.
+    fn variant<'t>(table: &'t TypeTable, id: TypeId, name: &str) -> &'t Fields {
+        match table.get(id).details() {
+            TypeDetails::Sum(Sum::Variadic(variants)) => variants
+                .iter()
+                .find(|(variant, _)| variant == name)
+                .map(|(_, fields)| fields)
+                .unwrap_or_else(|| panic!("no variant named `{name}`")),
+            other => panic!("expected a variadic sum, found {other:?}"),
+        }
+    }
+
+    /// How `id` prints as a declaration.
+    fn rendered(table: &TypeTable, id: TypeId) -> String {
+        table.get(id).display(table).to_string()
+    }
+
     #[test]
     fn the_tour_lowers_every_declaration_in_order() {
-        let types = lowered(include_str!("../samples/tour.datom")).expect("the tour must lower");
+        let table = lowered(include_str!("../samples/tour.datom")).expect("the tour must lower");
 
-        let names: Vec<&str> = types.iter().map(|ty| ty.name.as_str()).collect();
+        let names: Vec<&str> = table.iter().map(|id| table.name_of(id)).collect();
         assert_eq!(
             names,
             [
@@ -225,27 +250,35 @@ mod tests {
 
     #[test]
     fn expression_statements_lower_to_nothing() {
-        let types = lowered("42;\n\"hello, datom\";\ntrue;").expect("expressions parse");
-        assert!(types.is_empty(), "{types:?}");
+        let table = lowered("42;\n\"hello, datom\";\ntrue;").expect("expressions parse");
+
+        assert_eq!(table.iter().count(), 0);
     }
 
     #[test]
     fn a_field_holds_the_type_it_names_not_the_name() {
-        let types = lowered("type Address(city: string)\ntype Person(home: Address)").unwrap();
+        let table = lowered("type Address(city: string)\ntype Person(home: Address)").unwrap();
 
-        assert_eq!(single(&types[1])["home"], types[0]);
+        assert_eq!(
+            single(&table, nominal(&table, "Person"))["home"],
+            nominal(&table, "Address")
+        );
     }
 
     #[test]
     fn a_generic_lowers_to_a_collection_over_its_element() {
-        let types = lowered("type Grid(cells: list<list<number>>)").unwrap();
+        let table = lowered("type Grid(cells: list<list<number>>)").unwrap();
+        let cells = single(&table, nominal(&table, "Grid"))["cells"];
 
-        let number = Type::primitive(Primitive::Number);
-        let inner = Type::collection(Collection::List, number);
-        assert_eq!(
-            single(&types[0])["cells"],
-            Type::collection(Collection::List, inner)
-        );
+        let TypeDetails::Collection(Collection::List, inner) = *table.get(cells).details() else {
+            panic!("expected a list, found {:?}", table.get(cells).details());
+        };
+
+        let TypeDetails::Collection(Collection::List, element) = *table.get(inner).details() else {
+            panic!("expected a list, found {:?}", table.get(inner).details());
+        };
+
+        assert_eq!(element, table.primitive(Primitive::Number));
     }
 
     #[test]
@@ -268,38 +301,53 @@ mod tests {
 
     #[test]
     fn a_type_can_reference_itself() {
-        let types = lowered("type Category(name: string, children: list<Category>)").unwrap();
+        let table = lowered("type Category(name: string, children: list<Category>)").unwrap();
 
         assert_eq!(
-            types[0].to_string(),
+            rendered(&table, nominal(&table, "Category")),
             "type Category(children: list<Category>, name: string)"
         );
     }
 
     #[test]
     fn a_variant_can_reference_its_own_type() {
-        let types =
+        let table =
             lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
 
         assert_eq!(
-            types[0].to_string(),
+            rendered(&table, nominal(&table, "Tree")),
             "type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }"
         );
     }
 
     #[test]
     fn an_inline_variadic_can_reference_itself() {
-        let types = lowered("type Json = string | number | list<Json>;").unwrap();
+        let table = lowered("type Json = string | number | list<Json>;").unwrap();
+
         assert_eq!(
-            types[0].to_string(),
+            rendered(&table, nominal(&table, "Json")),
             "type Json = string | number | list<Json>;"
         );
     }
 
     #[test]
-    fn a_later_type_holds_the_full_definition_of_a_recursive_one() {
-        let types = lowered("type Node(value: number, next: Node)\ntype List(head: Node)").unwrap();
-        assert_eq!(single(&types[1])["head"], types[0]);
+    fn a_self_reference_holds_the_type_s_own_id() {
+        let table = lowered("type Node(value: number, next: Node)").unwrap();
+        let node = nominal(&table, "Node");
+
+        assert_eq!(single(&table, node)["next"], node);
+    }
+
+    #[test]
+    fn a_variant_self_reference_holds_the_whole_variadic_type() {
+        let table =
+            lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
+
+        let tree = nominal(&table, "Tree");
+        let branch = variant(&table, tree, "Branch");
+
+        assert_eq!(branch["left"], tree);
+        assert_eq!(branch["right"], tree);
     }
 
     #[test]

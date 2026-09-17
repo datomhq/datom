@@ -3,6 +3,7 @@ use std::{cell::RefCell, fmt::Display, range::Range};
 /// The severity level for the diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Severity {
+    #[allow(dead_code)]
     Warning,
     Error,
 }
@@ -37,6 +38,7 @@ impl Diagnostics {
         Self::default()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn warn(&self, message: impl Into<String>, start: usize, end: usize) {
         self.track(Severity::Warning, message.into(), Range { start, end });
     }
@@ -46,6 +48,7 @@ impl Diagnostics {
     }
 
     /// Returns true if no diagnostics have been emitted.
+    #[allow(dead_code)]
     pub(crate) fn is_ok(&self) -> bool {
         self.diagnostics.borrow().is_empty()
     }
