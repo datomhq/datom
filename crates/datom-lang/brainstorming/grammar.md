@@ -26,7 +26,17 @@ generic |- "<" typeName ">"
 
 exprStatement |- expr ";"
 
-expr |- number | string | bool
+// start at lowest precedence expr
+expr |- term
+
+// exprs only parse higher precedence exprs
+term |- factor (("-" | "+") factor)*
+
+factor |- unary (("*" | "/") unary)*
+
+unary |- ("!" | "-") unary | primary
+
+primary |- number | string | bool
 
 number |- [0-9]([0-9._])*
 

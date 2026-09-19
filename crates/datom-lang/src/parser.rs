@@ -59,6 +59,15 @@ pub(crate) enum Expr {
     Number(Token),
     String(Token),
     Bool(Token),
+    Binary {
+        left: Box<Expr>,
+        operator: Token,
+        right: Box<Expr>,
+    },
+    Unary {
+        operator: Token,
+        right: Box<Expr>,
+    },
 }
 
 /// Every token kind that may begin a type name.
@@ -115,7 +124,7 @@ where
         let mut statements = Vec::new();
 
         while self.tokens.peek().is_some() {
-            if self.is_next(TokenKind::Eof) {
+            if self.is_next(&[TokenKind::Eof]) {
                 self.advance_unchecked()?;
                 break;
             }
@@ -127,38 +136,21 @@ where
     }
 
     fn statement(&mut self) -> Result<Statement, CompileError> {
-        if self.is_next(TokenKind::Keyword(Keyword::Type)) {
+        if self.is_next(&[TokenKind::Keyword(Keyword::Type)]) {
             self.advance_unchecked()?;
             let stmt = self.type_statement()?;
             Ok(Statement::Type(stmt))
-        } else if self.is_next(TokenKind::Number) {
-            let number = self.advance_unchecked()?;
-            let _semicolon = self.expect(TokenKind::Semicolon)?;
-            Ok(Statement::Expr(Expr::Number(number)))
-        } else if self.is_next(TokenKind::String) {
-            let string = self.advance_unchecked()?;
-            let _semicolon = self.expect(TokenKind::Semicolon)?;
-            Ok(Statement::Expr(Expr::String(string)))
-        } else if self.is_next(TokenKind::Keyword(Keyword::True))
-            || self.is_next(TokenKind::Keyword(Keyword::False))
-        {
-            let bool = self.advance_unchecked()?;
-            let _semicolon = self.expect(TokenKind::Semicolon)?;
-            Ok(Statement::Expr(Expr::Bool(bool)))
         } else {
-            let actual = match self.tokens.next() {
-                Some(result) => Some(result?.kind),
-                None => None,
-            };
-
-            Err(ParseError::Expected(vec![TokenKind::Keyword(Keyword::Type)], actual).into())
+            let expr = self.expr()?;
+            let _semicolon = self.expect(TokenKind::Semicolon)?;
+            Ok(Statement::Expr(expr))
         }
     }
 
     fn type_statement(&mut self) -> Result<TypeStatement, CompileError> {
         let ident = self.expect(TokenKind::Identifier)?;
 
-        if self.is_next(TokenKind::LeftParen) {
+        if self.is_next(&[TokenKind::LeftParen]) {
             let _left_paren = self.advance_unchecked()?;
             let fields = self.type_fields()?;
             let _right_paren = self.expect(TokenKind::RightParen)?;
@@ -167,15 +159,15 @@ where
                 name: ident,
                 fields,
             }))
-        } else if self.is_next(TokenKind::LeftCurly) {
+        } else if self.is_next(&[TokenKind::LeftCurly]) {
             let _left_curly = self.advance_unchecked()?;
 
             let mut constructors = vec![self.type_constructor()?];
 
-            while self.is_next(TokenKind::Comma) {
+            while self.is_next(&[TokenKind::Comma]) {
                 let _comma = self.advance_unchecked();
 
-                if self.is_next(TokenKind::Identifier) {
+                if self.is_next(&[TokenKind::Identifier]) {
                     constructors.push(self.type_constructor()?);
                 } else {
                     break;
@@ -185,11 +177,11 @@ where
             let _right_curly = self.expect(TokenKind::RightCurly)?;
 
             Ok(TypeStatement::Variadic((ident, constructors)))
-        } else if self.is_next(TokenKind::Equals) {
+        } else if self.is_next(&[TokenKind::Equals]) {
             let _equals = self.advance_unchecked()?;
             let mut tys = vec![self.type_name()?];
 
-            while self.is_next(TokenKind::Bar) {
+            while self.is_next(&[TokenKind::Bar]) {
                 let _bar = self.advance_unchecked();
                 tys.push(self.type_name()?);
             }
@@ -250,10 +242,10 @@ where
     fn type_fields(&mut self) -> Result<TypeFields, CompileError> {
         let mut fields = vec![self.type_field()?];
 
-        while self.is_next(TokenKind::Comma) {
+        while self.is_next(&[TokenKind::Comma]) {
             let _comma = self.advance_unchecked()?;
 
-            if self.is_next(TokenKind::Identifier) {
+            if self.is_next(&[TokenKind::Identifier]) {
                 fields.push(self.type_field()?);
             } else {
                 break;
@@ -271,16 +263,93 @@ where
         Ok(TypeField { name, ty })
     }
 
+    fn expr(&mut self) -> Result<Expr, CompileError> {
+        return self.term();
+    }
+
+    fn term(&mut self) -> Result<Expr, CompileError> {
+        let mut expr = self.factor()?;
+
+        while self.is_next(&[TokenKind::Minus, TokenKind::Plus]) {
+            let operator = self.advance_unchecked()?;
+            let right = self.factor()?;
+
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    fn factor(&mut self) -> Result<Expr, CompileError> {
+        let mut expr = self.unary()?;
+
+        while self.is_next(&[TokenKind::Star, TokenKind::Slash]) {
+            let operator = self.advance_unchecked()?;
+            let right = self.unary()?;
+
+            expr = Expr::Binary {
+                left: Box::new(expr),
+                operator,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    fn unary(&mut self) -> Result<Expr, CompileError> {
+        if self.is_next(&[TokenKind::Bang, TokenKind::Minus]) {
+            let operator = self.advance_unchecked()?;
+            let right = self.unary()?;
+
+            return Ok(Expr::Unary {
+                operator,
+                right: Box::from(right),
+            });
+        }
+
+        return self.primary();
+    }
+
+    fn primary(&mut self) -> Result<Expr, CompileError> {
+        if self.is_next(&[TokenKind::Number]) {
+            let number = self.advance_unchecked()?;
+            Ok(Expr::Number(number))
+        } else if self.is_next(&[TokenKind::String]) {
+            let string = self.advance_unchecked()?;
+            Ok(Expr::String(string))
+        } else if self.is_next(&[
+            TokenKind::Keyword(Keyword::True),
+            TokenKind::Keyword(Keyword::False),
+        ]) {
+            let bool = self.advance_unchecked()?;
+            Ok(Expr::Bool(bool))
+        } else {
+            let actual = match self.tokens.next() {
+                Some(result) => Some(result?.kind),
+                None => None,
+            };
+
+            Err(ParseError::Unexpected(actual).into())
+        }
+    }
+
     // MARK: - Helpers
 
-    fn is_next(&mut self, kind: TokenKind) -> bool {
-        if let Some(token) = self.tokens.peek()
-            && token.clone().is_ok_and(|t| t.kind == kind)
-        {
-            true
-        } else {
-            false
+    fn is_next(&mut self, kinds: &[TokenKind]) -> bool {
+        if let Some(Ok(token)) = self.tokens.peek() {
+            for kind in kinds {
+                if token.kind == *kind {
+                    return true;
+                }
+            }
         }
+
+        false
     }
 
     /// Advance the iterator, unwrapping the Option and returning the contained Result.
@@ -291,7 +360,7 @@ where
 
     /// Advance the iterator only if the peeked token matches the specified kind.
     fn advance_if(&mut self, kind: TokenKind) -> Result<Option<Token>, CompileError> {
-        if self.is_next(kind) {
+        if self.is_next(&[kind]) {
             Ok(Some(self.advance_unchecked()?))
         } else {
             Ok(None)
@@ -349,6 +418,12 @@ mod tests {
         NumberExpr,
         StringExpr,
         BoolExpr,
+        BinaryExpr,
+        PlusOperator,
+        MinusOperator,
+        StarOperator,
+        SlashOperator,
+        BangOperator,
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -357,19 +432,82 @@ mod tests {
         lexeme: String,
     }
 
-    trait IntoNode<'src> {
-        fn into_node(self, source: &'src str) -> Node;
+    trait IntoNodes<'src> {
+        fn into_nodes(self, source: &'src str) -> Vec<Node>;
     }
 
-    impl<'src> IntoNode<'src> for TypeField {
-        fn into_node(self, source: &'src str) -> Node {
-            Node {
+    impl<'src> IntoNodes<'src> for TypeField {
+        fn into_nodes(self, source: &'src str) -> Vec<Node> {
+            vec![Node {
                 kind: NodeKind::TypeField,
                 lexeme: format!(
                     "{}: {}",
                     self.name.lexeme(source),
                     format_type_name(source, self.ty)
                 ),
+            }]
+        }
+    }
+
+    impl<'src> IntoNodes<'src> for Expr {
+        fn into_nodes(self, source: &'src str) -> Vec<Node> {
+            match self {
+                Expr::Number(token) => vec![Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from(token.lexeme(source)),
+                }],
+                Expr::String(token) => vec![Node {
+                    kind: NodeKind::StringExpr,
+                    lexeme: String::from(token.lexeme(source)),
+                }],
+                Expr::Bool(token) => vec![Node {
+                    kind: NodeKind::BoolExpr,
+                    lexeme: String::from(token.lexeme(source)),
+                }],
+                Expr::Binary {
+                    left,
+                    operator,
+                    right,
+                } => {
+                    let operator_node_kind = match operator.kind {
+                        TokenKind::Plus => NodeKind::PlusOperator,
+                        TokenKind::Minus => NodeKind::MinusOperator,
+                        TokenKind::Star => NodeKind::StarOperator,
+                        TokenKind::Slash => NodeKind::SlashOperator,
+                        _ => panic!("malformed binary operator"),
+                    };
+
+                    let operator_node = Node {
+                        kind: operator_node_kind,
+                        lexeme: String::from(operator.lexeme(source)),
+                    };
+
+                    let left_nodes = left.into_nodes(source);
+                    let right_nodes = right.into_nodes(source);
+
+                    let mut nodes = vec![operator_node];
+                    nodes.extend(left_nodes);
+                    nodes.extend(right_nodes);
+                    nodes
+                }
+                Expr::Unary { operator, right } => {
+                    let operator_node_kind = match operator.kind {
+                        TokenKind::Bang => NodeKind::BangOperator,
+                        TokenKind::Minus => NodeKind::MinusOperator,
+                        _ => panic!("malformed unary operator"),
+                    };
+
+                    let operator_node = Node {
+                        kind: operator_node_kind,
+                        lexeme: String::from(operator.lexeme(source)),
+                    };
+
+                    let right_nodes = right.into_nodes(source);
+
+                    let mut nodes = vec![operator_node];
+                    nodes.extend(right_nodes);
+                    nodes
+                }
             }
         }
     }
@@ -414,7 +552,7 @@ mod tests {
                             });
 
                             for field in ctor.fields {
-                                out.push(field.into_node(source));
+                                out.extend(field.into_nodes(source));
                             }
                         }
                         TypeStatement::Variadic((name, ctors)) => {
@@ -430,7 +568,7 @@ mod tests {
                                 });
 
                                 for field in ctor.fields {
-                                    out.push(field.into_node(source));
+                                    out.extend(field.into_nodes(source));
                                 }
                             }
                         }
@@ -455,22 +593,7 @@ mod tests {
                         lexeme: String::new(),
                     });
 
-                    let node = match expr {
-                        Expr::Number(token) => Node {
-                            kind: NodeKind::NumberExpr,
-                            lexeme: String::from(token.lexeme(source)),
-                        },
-                        Expr::String(token) => Node {
-                            kind: NodeKind::StringExpr,
-                            lexeme: String::from(token.lexeme(source)),
-                        },
-                        Expr::Bool(token) => Node {
-                            kind: NodeKind::BoolExpr,
-                            lexeme: String::from(token.lexeme(source)),
-                        },
-                    };
-
-                    out.push(node);
+                    out.extend(expr.into_nodes(source));
                 }
             }
         }
@@ -811,6 +934,109 @@ mod tests {
                 Node {
                     kind: NodeKind::BoolExpr,
                     lexeme: String::from("false"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn plus_expression() {
+        let source = "4 + 2;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::PlusOperator,
+                    lexeme: String::from("+"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("4"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("2"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn complex_times_expression() {
+        let source = "6 + 2 * 3;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::PlusOperator,
+                    lexeme: String::from("+"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("6"),
+                },
+                Node {
+                    kind: NodeKind::StarOperator,
+                    lexeme: String::from("*"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("2"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("3"),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn not_expression() {
+        let source = "!true;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::new(),
+                },
+                Node {
+                    kind: NodeKind::BangOperator,
+                    lexeme: String::from("!"),
+                },
+                Node {
+                    kind: NodeKind::BoolExpr,
+                    lexeme: String::from("true"),
                 },
             ],
         );
