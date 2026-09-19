@@ -975,7 +975,7 @@ mod tests {
 
     #[test]
     fn complex_times_expression() {
-        let source = "6 + 2 * 3;";
+        let source = "6 * 2 + 3;";
 
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
@@ -993,12 +993,12 @@ mod tests {
                     lexeme: String::from("+"),
                 },
                 Node {
-                    kind: NodeKind::NumberExpr,
-                    lexeme: String::from("6"),
-                },
-                Node {
                     kind: NodeKind::StarOperator,
                     lexeme: String::from("*"),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("6"),
                 },
                 Node {
                     kind: NodeKind::NumberExpr,
