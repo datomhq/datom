@@ -1,9 +1,9 @@
 use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ScanError},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +201,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
         let start = self.offset;
 
         // underscores are supported as arbitrary separators
-        self.advance_while(|c| c.is_digit(10) || c == '_' || c == '.');
+        self.advance_while(|c| c.is_ascii_digit() || c == '_' || c == '.');
 
         let end = self.offset + 1;
 
@@ -233,7 +233,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         ',' => Token::new(TokenKind::Comma, self.offset, self.offset + 1),
                         ':' => Token::new(TokenKind::Colon, self.offset, self.offset + 1),
                         '"' => return Some(self.string()),
-                        _ if char.is_digit(10) => self.number(),
+                        _ if char.is_ascii_digit() => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
