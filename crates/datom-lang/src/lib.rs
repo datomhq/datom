@@ -9,6 +9,7 @@ pub(crate) mod diagnostics;
 pub(crate) mod error;
 pub(crate) mod parser;
 pub(crate) mod scanner;
+pub(crate) mod typechecker;
 
 /// A primitive type within the datom type system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,17 +210,14 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
     f.write_str(")")
 }
 
-// The final signature will not return the parser::Program AST; this is just done as a stopgap for now.
+// The final signature will not return the typechecker::TypedProgram AST; this is just done as a stopgap for now.
 #[allow(private_interfaces)]
 /// Compile the source code into an executable representation.
-pub fn compile(source: &str) -> Result<parser::Program, error::CompileError> {
+pub fn compile(source: &str) -> Result<typechecker::TypedProgram, error::CompileError> {
     let diag = diagnostics::Diagnostics::new();
     let tokens = scanner::scan(source, &diag);
-    parser::parse(source, &diag, tokens)
-
-    // as more stages accumulate, you might have:
-    // if !diag.is_ok() { ... }
-    // to stop compilation once errors appear, for example
+    let program = parser::parse(source, &diag, tokens)?;
+    typechecker::typecheck(source, &diag, program)
 }
 
 #[cfg(test)]
