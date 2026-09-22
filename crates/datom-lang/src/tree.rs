@@ -1,6 +1,6 @@
 //! Renders a parsed [`Program`] as an indented outline.
 //!
-//! This is the shape `datom parse` prints.
+//! This is the shape `datom check` prints.
 
 use crate::parser::{
     Expr, Program, Statement, TypeConstructor, TypeFields, TypeName, TypeStatement,
