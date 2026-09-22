@@ -1,10 +1,10 @@
 use std::{iter::Peekable, range::Range};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -359,15 +359,6 @@ where
         self.tokens.next().unwrap()
     }
 
-    /// Advance the iterator only if the peeked token matches the specified kind.
-    fn advance_if(&mut self, kind: TokenKind) -> Result<Option<Token>, CompileError> {
-        if self.is_next(&[kind]) {
-            Ok(Some(self.advance_unchecked()?))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Advance the iterator and confirm the received token is of the expected kind. Returns
     /// a ParseError if the token is not the right kind.
     fn expect(&mut self, kind: TokenKind) -> Result<Token, CompileError> {
@@ -435,7 +426,6 @@ mod tests {
         NumberExpr,
         StringExpr,
         BoolExpr,
-        BinaryExpr,
         PlusOperator,
         MinusOperator,
         StarOperator,
