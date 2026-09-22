@@ -85,6 +85,14 @@ const TYPE_NAME_KINDS: &[TokenKind] = &[
     TokenKind::Keyword(Keyword::Collection(Collection::Set)),
 ];
 
+/// Every token kind that may be a primary expression.
+const PRIMARY_KINDS: &[TokenKind] = &[
+    TokenKind::Number,
+    TokenKind::String,
+    TokenKind::Keyword(Keyword::True),
+    TokenKind::Keyword(Keyword::False),
+];
+
 pub(crate) fn parse(
     source: &str,
     diagnostics: &Diagnostics,
@@ -316,25 +324,13 @@ where
     }
 
     fn primary(&mut self) -> Result<Expr, CompileError> {
-        if self.is_next(&[TokenKind::Number]) {
-            let number = self.advance_unchecked()?;
-            Ok(Expr::Number(number))
-        } else if self.is_next(&[TokenKind::String]) {
-            let string = self.advance_unchecked()?;
-            Ok(Expr::String(string))
-        } else if self.is_next(&[
-            TokenKind::Keyword(Keyword::True),
-            TokenKind::Keyword(Keyword::False),
-        ]) {
-            let bool = self.advance_unchecked()?;
-            Ok(Expr::Bool(bool))
-        } else {
-            let actual = match self.tokens.next() {
-                Some(result) => Some(result?.kind),
-                None => None,
-            };
+        let token = self.expect_any(PRIMARY_KINDS)?;
 
-            Err(ParseError::Unexpected(actual).into())
+        match token.kind {
+            TokenKind::Number => Ok(Expr::Number(token)),
+            TokenKind::String => Ok(Expr::String(token)),
+            TokenKind::Keyword(Keyword::True | Keyword::False) => Ok(Expr::Bool(token)),
+            _ => Err(ParseError::Unexpected(Some(token.kind)).into()),
         }
     }
 
