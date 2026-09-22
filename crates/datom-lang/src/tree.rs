@@ -103,6 +103,23 @@ fn expression(out: &mut String, source: &str, prefix: &str, last: bool, expr: &E
         Expr::Number(token) => ("number", token),
         Expr::String(token) => ("string", token),
         Expr::Bool(token) => ("bool", token),
+        Expr::Binary {
+            left,
+            operator,
+            right,
+        } => {
+            let label = format!("binary `{}`", operator.lexeme(source));
+            let child = branch(out, prefix, last, &label);
+            expression(out, source, &child, false, left);
+            expression(out, source, &child, true, right);
+            return;
+        }
+        Expr::Unary { operator, right } => {
+            let label = format!("unary `{}`", operator.lexeme(source));
+            let child = branch(out, prefix, last, &label);
+            expression(out, source, &child, true, right);
+            return;
+        }
     };
 
     let label = format!("{kind} literal `{}`", token.lexeme(source));
@@ -199,6 +216,24 @@ program
 ├─ number literal `1_000.23`
 ├─ string literal `\"hello\"`
 └─ bool literal `true`
+"
+        );
+    }
+
+    #[test]
+    fn operators_nest_their_operands() {
+        assert_eq!(
+            tree("-1 + 2 * 3; !true;"),
+            "\
+program
+├─ binary `+`
+│  ├─ unary `-`
+│  │  └─ number literal `1`
+│  └─ binary `*`
+│     ├─ number literal `2`
+│     └─ number literal `3`
+└─ unary `!`
+   └─ bool literal `true`
 "
         );
     }

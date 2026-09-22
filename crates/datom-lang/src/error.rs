@@ -58,6 +58,7 @@ impl Error for ScanError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ParseError {
     Expected(Vec<TokenKind>, Option<TokenKind>),
+    Unexpected(Option<TokenKind>),
 }
 
 impl Display for ParseError {
@@ -82,6 +83,10 @@ impl Display for ParseError {
                     None => f.write_str(", found nothing"),
                 }
             }
+            Self::Unexpected(actual) => match actual {
+                Some(actual) => write!(f, "unexpected token {actual}"),
+                None => write!(f, "unexpected token"),
+            },
         }
     }
 }
