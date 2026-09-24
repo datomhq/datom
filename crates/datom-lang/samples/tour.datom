@@ -74,7 +74,9 @@ type Party = Customer | Product | Tag;
 
 type Anything = list<number> | set<string> | Money;
 
-42;
+-1;
+1 + 2 + 3;
+1 * 2 + 3;
 1_000.23;
 "hello, datom";
 true;
