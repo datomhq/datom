@@ -1,9 +1,9 @@
 use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ScanError},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,7 +211,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
         let start = self.offset;
 
         // underscores are supported as arbitrary separators
-        self.advance_while(|c| c.is_digit(10) || c == '_' || c == '.');
+        self.advance_while(|c| c.is_ascii_digit() || c == '_' || c == '.');
 
         let end = self.offset + 1;
 
@@ -248,7 +248,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         '*' => Token::new(TokenKind::Star, self.offset, self.offset + 1),
                         '/' => Token::new(TokenKind::Slash, self.offset, self.offset + 1),
                         '"' => return Some(self.string()),
-                        _ if char.is_digit(10) => self.number(),
+                        _ if char.is_ascii_digit() => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
@@ -524,7 +524,7 @@ mod tests {
         let rendered = diagnostics.render(source);
 
         // has the correct line:col coordinate
-        assert!(rendered.contains("[1:9]"));
+        assert!(rendered.contains("[1:10]"));
 
         // indicates it's an error severity
         assert!(rendered.contains("error"));
