@@ -5,10 +5,12 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+pub(crate) mod ast;
 pub(crate) mod diagnostics;
 pub(crate) mod error;
 pub(crate) mod parser;
 pub(crate) mod scanner;
+pub(crate) mod src_span;
 pub(crate) mod typechecker;
 
 /// A primitive type within the datom type system.
