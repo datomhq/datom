@@ -16,6 +16,7 @@ pub mod schema;
 pub mod schema_diff;
 #[cfg(test)]
 mod test_support;
+pub mod types;
 pub mod types_format;
 
 pub use connectivity::{
@@ -36,6 +37,7 @@ pub use schema::{
     infer_value, rename_as_inferred,
 };
 pub use schema_diff::{SchemaChange, diff_schemas};
+pub use types::{Collection, Fields, Primitive, Sum, Type, TypeDetails, TypeId, TypeTable};
 pub use types_format::{
     TYPES_FILE_SUFFIX, load_tables, parse_tables, render_tables, save_tables, types_path,
 };
