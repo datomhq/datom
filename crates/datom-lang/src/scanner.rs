@@ -1,9 +1,10 @@
-use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
+use std::{fmt::Display, iter::Peekable, str::Chars};
 
 use crate::{
     Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ScanError},
+    src_span::SrcSpan,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,19 +82,19 @@ pub(crate) struct Token {
     /// The kind this token is.
     pub kind: TokenKind,
     /// The range of the source string where this token was found.
-    pub range: Range<usize>,
+    pub location: SrcSpan,
 }
 
 impl Token {
     fn new(kind: TokenKind, start: usize, end: usize) -> Self {
         Self {
             kind,
-            range: Range { start, end },
+            location: SrcSpan::new(start, end),
         }
     }
 
     pub(crate) fn lexeme<'a>(&self, source: &'a str) -> &'a str {
-        &source[self.range]
+        self.location.lexeme(source)
     }
 
     #[cfg(test)]

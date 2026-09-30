@@ -2,6 +2,7 @@ use std::iter::Peekable;
 
 use crate::{
     Collection, Primitive,
+    ast::{BinOp, NumberLiteral, UnaryOp, UntypedExpr},
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
@@ -15,7 +16,7 @@ pub(crate) struct Program {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Statement {
     Type(TypeStatement),
-    Expr(Expr),
+    Expr(UntypedExpr),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -55,18 +56,18 @@ pub(crate) enum TypeName {
 pub(crate) type Generic = TypeName;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Expr {
+pub(crate) enum _Expr {
     Number(Token),
     String(Token),
     Bool(Token),
     Binary {
-        left: Box<Expr>,
+        left: Box<_Expr>,
         operator: Token,
-        right: Box<Expr>,
+        right: Box<_Expr>,
     },
     Unary {
         operator: Token,
-        right: Box<Expr>,
+        right: Box<_Expr>,
     },
 }
 
@@ -271,18 +272,27 @@ where
         Ok(TypeField { name, ty })
     }
 
-    fn expr(&mut self) -> Result<Expr, CompileError> {
+    fn expr(&mut self) -> Result<UntypedExpr, CompileError> {
         return self.term();
     }
 
-    fn term(&mut self) -> Result<Expr, CompileError> {
+    fn term(&mut self) -> Result<UntypedExpr, CompileError> {
         let mut expr = self.factor()?;
 
         while self.is_next(&[TokenKind::Minus, TokenKind::Plus]) {
-            let operator = self.advance_unchecked()?;
+            let operator_token = self.advance_unchecked()?;
             let right = self.factor()?;
 
-            expr = Expr::Binary {
+            let operator = match operator_token.kind {
+                TokenKind::Minus => BinOp::Minus,
+                TokenKind::Plus => BinOp::Plus,
+
+                // SAFETY: kind is checked by self.is_next above
+                _ => unreachable!(),
+            };
+
+            expr = UntypedExpr::BinOp {
+                location: expr.location().merge(right.location()),
                 left: Box::new(expr),
                 operator,
                 right: Box::new(right),
@@ -292,14 +302,23 @@ where
         Ok(expr)
     }
 
-    fn factor(&mut self) -> Result<Expr, CompileError> {
+    fn factor(&mut self) -> Result<UntypedExpr, CompileError> {
         let mut expr = self.unary()?;
 
         while self.is_next(&[TokenKind::Star, TokenKind::Slash]) {
-            let operator = self.advance_unchecked()?;
+            let operator_token = self.advance_unchecked()?;
             let right = self.unary()?;
 
-            expr = Expr::Binary {
+            let operator = match operator_token.kind {
+                TokenKind::Star => BinOp::Times,
+                TokenKind::Slash => BinOp::Divide,
+
+                // SAFETY: kind is checked by is_next above
+                _ => unreachable!(),
+            };
+
+            expr = UntypedExpr::BinOp {
+                location: expr.location().merge(right.location()),
                 left: Box::new(expr),
                 operator,
                 right: Box::new(right),
@@ -309,12 +328,21 @@ where
         Ok(expr)
     }
 
-    fn unary(&mut self) -> Result<Expr, CompileError> {
+    fn unary(&mut self) -> Result<UntypedExpr, CompileError> {
         if self.is_next(&[TokenKind::Bang, TokenKind::Minus]) {
-            let operator = self.advance_unchecked()?;
+            let operator_token = self.advance_unchecked()?;
             let right = self.unary()?;
 
-            return Ok(Expr::Unary {
+            let operator = match operator_token.kind {
+                TokenKind::Bang => UnaryOp::Not,
+                TokenKind::Minus => UnaryOp::Negative,
+
+                // SAFETY: kind checked by is_next above
+                _ => unreachable!(),
+            };
+
+            return Ok(UntypedExpr::UnaryOp {
+                location: operator_token.location.merge(right.location()),
                 operator,
                 right: Box::from(right),
             });
@@ -323,15 +351,34 @@ where
         return self.primary();
     }
 
-    fn primary(&mut self) -> Result<Expr, CompileError> {
+    fn primary(&mut self) -> Result<UntypedExpr, CompileError> {
         let token = self.expect_any(PRIMARY_KINDS)?;
 
-        match token.kind {
-            TokenKind::Number => Ok(Expr::Number(token)),
-            TokenKind::String => Ok(Expr::String(token)),
-            TokenKind::Keyword(Keyword::True | Keyword::False) => Ok(Expr::Bool(token)),
-            _ => Err(ParseError::Unexpected(Some(token.kind)).into()),
-        }
+        let expr = match token.kind {
+            TokenKind::Number => {
+                let value = if let Some(value) = NumberLiteral::parse(token.lexeme(self.source)) {
+                    value
+                } else {
+                    return Err(ParseError::InvalidNumber(token.location).into());
+                };
+
+                UntypedExpr::Number {
+                    location: token.location,
+                    value,
+                }
+            }
+            TokenKind::String => UntypedExpr::String {
+                location: token.location,
+                value: String::from(token.lexeme(self.source)),
+            },
+            TokenKind::Keyword(Keyword::True | Keyword::False) => UntypedExpr::Bool {
+                location: token.location,
+                value: token.kind == TokenKind::Keyword(Keyword::True),
+            },
+            _ => return Err(ParseError::Unexpected(Some(token.kind)).into()),
+        };
+
+        Ok(expr)
     }
 
     // MARK: - Helpers
@@ -445,37 +492,44 @@ mod tests {
         }
     }
 
-    impl<'src> IntoNodes<'src> for Expr {
+    impl<'src> IntoNodes<'src> for UntypedExpr {
         fn into_nodes(self, source: &'src str) -> Vec<Node> {
             match self {
-                Expr::Number(token) => vec![Node {
+                UntypedExpr::Number { location, .. } => vec![Node {
                     kind: NodeKind::NumberExpr,
-                    lexeme: String::from(token.lexeme(source)),
+                    lexeme: String::from(location.lexeme(source)),
                 }],
-                Expr::String(token) => vec![Node {
+                UntypedExpr::String { location, .. } => vec![Node {
                     kind: NodeKind::StringExpr,
-                    lexeme: String::from(token.lexeme(source)),
+                    lexeme: String::from(location.lexeme(source)),
                 }],
-                Expr::Bool(token) => vec![Node {
+                UntypedExpr::Bool { location, .. } => vec![Node {
                     kind: NodeKind::BoolExpr,
-                    lexeme: String::from(token.lexeme(source)),
+                    lexeme: String::from(location.lexeme(source)),
                 }],
-                Expr::Binary {
+                UntypedExpr::BinOp {
                     left,
                     operator,
                     right,
+                    ..
                 } => {
-                    let operator_node_kind = match operator.kind {
-                        TokenKind::Plus => NodeKind::PlusOperator,
-                        TokenKind::Minus => NodeKind::MinusOperator,
-                        TokenKind::Star => NodeKind::StarOperator,
-                        TokenKind::Slash => NodeKind::SlashOperator,
-                        _ => panic!("malformed binary operator"),
+                    let operator_node_kind = match operator {
+                        BinOp::Plus => NodeKind::PlusOperator,
+                        BinOp::Minus => NodeKind::MinusOperator,
+                        BinOp::Times => NodeKind::StarOperator,
+                        BinOp::Divide => NodeKind::SlashOperator,
+                    };
+
+                    let operator_node_lexeme = match operator {
+                        BinOp::Plus => "+",
+                        BinOp::Minus => "-",
+                        BinOp::Times => "*",
+                        BinOp::Divide => "/",
                     };
 
                     let operator_node = Node {
                         kind: operator_node_kind,
-                        lexeme: String::from(operator.lexeme(source)),
+                        lexeme: String::from(operator_node_lexeme),
                     };
 
                     let left_nodes = left.into_nodes(source);
@@ -486,16 +540,22 @@ mod tests {
                     nodes.extend(right_nodes);
                     nodes
                 }
-                Expr::Unary { operator, right } => {
-                    let operator_node_kind = match operator.kind {
-                        TokenKind::Bang => NodeKind::BangOperator,
-                        TokenKind::Minus => NodeKind::MinusOperator,
-                        _ => panic!("malformed unary operator"),
+                UntypedExpr::UnaryOp {
+                    operator, right, ..
+                } => {
+                    let operator_node_kind = match operator {
+                        UnaryOp::Not => NodeKind::BangOperator,
+                        UnaryOp::Negative => NodeKind::MinusOperator,
+                    };
+
+                    let operator_node_lexeme = match operator {
+                        UnaryOp::Not => "!",
+                        UnaryOp::Negative => "-",
                     };
 
                     let operator_node = Node {
                         kind: operator_node_kind,
-                        lexeme: String::from(operator.lexeme(source)),
+                        lexeme: String::from(operator_node_lexeme),
                     };
 
                     let right_nodes = right.into_nodes(source);

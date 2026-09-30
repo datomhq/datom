@@ -13,6 +13,12 @@ impl SrcSpan {
     pub fn lexeme<'src>(&self, source: &'src str) -> &'src str {
         &source[self.location]
     }
+
+    pub fn merge(&self, other: &Self) -> Self {
+        let start = self.location.start.min(other.location.start);
+        let end = self.location.end.max(other.location.end);
+        Self::new(start, end)
+    }
 }
 
 impl From<Range<usize>> for SrcSpan {

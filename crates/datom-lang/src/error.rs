@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use crate::scanner::TokenKind;
+use crate::{scanner::TokenKind, src_span::SrcSpan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompileError {
@@ -59,6 +59,7 @@ impl Error for ScanError {}
 pub(crate) enum ParseError {
     Expected(Vec<TokenKind>, Option<TokenKind>),
     Unexpected(Option<TokenKind>),
+    InvalidNumber(SrcSpan),
 }
 
 impl Display for ParseError {
@@ -87,6 +88,10 @@ impl Display for ParseError {
                 Some(actual) => write!(f, "unexpected token {actual}"),
                 None => write!(f, "unexpected token"),
             },
+            Self::InvalidNumber(_location) => {
+                // TODO: print the actual lexeme from source
+                write!(f, "invalid number literal")
+            }
         }
     }
 }
