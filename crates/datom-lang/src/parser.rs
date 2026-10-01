@@ -55,22 +55,6 @@ pub(crate) enum TypeName {
 
 pub(crate) type Generic = TypeName;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum _Expr {
-    Number(Token),
-    String(Token),
-    Bool(Token),
-    Binary {
-        left: Box<_Expr>,
-        operator: Token,
-        right: Box<_Expr>,
-    },
-    Unary {
-        operator: Token,
-        right: Box<_Expr>,
-    },
-}
-
 /// Every token kind that may begin a type name.
 const TYPE_NAME_KINDS: &[TokenKind] = &[
     // user-named type
