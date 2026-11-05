@@ -67,13 +67,11 @@ impl TypeRef {
         }
     }
 
-    /// The type referred to; panics if a weak reference outlived it.
-    pub fn get(&self) -> Arc<Type> {
+    /// The type referred to; `None` if a weak reference outlived it.
+    pub fn get(&self) -> Option<Arc<Type>> {
         match self {
-            Self::Strong(ty) => Arc::clone(ty),
-            Self::Weak(ty) => ty
-                .upgrade()
-                .expect("a type outlived the type it refers back to"),
+            Self::Strong(ty) => Some(Arc::clone(ty)),
+            Self::Weak(ty) => ty.upgrade(),
         }
     }
 
@@ -163,7 +161,7 @@ impl TypeTable {
 
     /// `kind` over `inner`, interned.
     pub fn collection(&mut self, kind: Collection, inner: TypeRef) -> Arc<Type> {
-        let name = format!("{kind}<{}>", inner.get().name);
+        let name = format!("{kind}<{inner:?}>");
         let details = TypeDetails::Collection(kind, inner);
 
         if let Some(ty) = self
@@ -352,7 +350,7 @@ impl Display for Type {
                     if i > 0 {
                         f.write_str(" | ")?;
                     }
-                    f.write_str(&member.get().name)?;
+                    write!(f, "{member:?}")?;
                 }
                 f.write_str(";")
             }
@@ -370,7 +368,7 @@ fn write_fields(f: &mut Formatter<'_>, fields: &Fields) -> fmt::Result {
         if i > 0 {
             f.write_str(", ")?;
         }
-        write!(f, "{name}: {}", fields[name].get().name)?;
+        write!(f, "{name}: {:?}", fields[name])?;
     }
     f.write_str(")")
 }

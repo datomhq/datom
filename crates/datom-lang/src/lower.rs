@@ -259,7 +259,7 @@ mod tests {
         let table = lowered("type Address(city: string)\ntype Person(home: Address)").unwrap();
 
         assert_eq!(
-            single(&nominal(&table, "Person"))["home"].get(),
+            single(&nominal(&table, "Person"))["home"].get().unwrap(),
             nominal(&table, "Address")
         );
     }
@@ -267,18 +267,18 @@ mod tests {
     #[test]
     fn a_generic_lowers_to_a_collection_over_its_element() {
         let table = lowered("type Grid(cells: list<list<number>>)").unwrap();
-        let cells = single(&nominal(&table, "Grid"))["cells"].get();
+        let cells = single(&nominal(&table, "Grid"))["cells"].get().unwrap();
 
         let TypeDetails::Collection(Collection::List, inner) = cells.details() else {
             panic!("expected a list, found {:?}", cells.details());
         };
 
-        let inner = inner.get();
+        let inner = inner.get().unwrap();
         let TypeDetails::Collection(Collection::List, element) = inner.details() else {
             panic!("expected a list, found {:?}", inner.details());
         };
 
-        assert_eq!(element.get(), table.primitive(Primitive::Number));
+        assert_eq!(element.get().unwrap(), table.primitive(Primitive::Number));
     }
 
     #[test]
@@ -335,7 +335,7 @@ mod tests {
         let table = lowered("type Node(value: number, next: Node)").unwrap();
         let node = nominal(&table, "Node");
 
-        assert_eq!(single(&node)["next"].get(), node);
+        assert_eq!(single(&node)["next"].get().unwrap(), node);
     }
 
     #[test]
@@ -349,6 +349,19 @@ mod tests {
     }
 
     #[test]
+    fn a_collection_outliving_its_self_referencing_type_finds_it_dropped() {
+        let table = lowered("type Tree(children: list<Tree>)").unwrap();
+        let children = single(&nominal(&table, "Tree"))["children"].get().unwrap();
+
+        drop(table);
+
+        let TypeDetails::Collection(Collection::List, inner) = children.details() else {
+            panic!("expected a list, found {:?}", children.details());
+        };
+        assert!(inner.get().is_none());
+    }
+
+    #[test]
     fn a_variant_self_reference_holds_the_whole_variadic_type() {
         let table =
             lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
@@ -356,8 +369,8 @@ mod tests {
         let tree = nominal(&table, "Tree");
         let branch = variant(&tree, "Branch");
 
-        assert_eq!(branch["left"].get(), tree);
-        assert_eq!(branch["right"].get(), tree);
+        assert_eq!(branch["left"].get().unwrap(), tree);
+        assert_eq!(branch["right"].get().unwrap(), tree);
     }
 
     #[test]
