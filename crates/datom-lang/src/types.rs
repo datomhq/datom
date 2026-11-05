@@ -172,12 +172,18 @@ impl TypeTable {
             return Arc::clone(ty);
         }
 
-        self.push(name, OnceLock::from(details))
+        self.push(Type {
+            name,
+            details: OnceLock::from(details),
+        })
     }
 
     /// Reserve a declared type, its body to follow.
     pub fn declare(&mut self, name: &str) -> Arc<Type> {
-        let ty = self.push(name.to_string(), OnceLock::new());
+        let ty = self.push(Type {
+            name: name.to_string(),
+            details: OnceLock::new(),
+        });
 
         self.declared.push(Arc::clone(&ty));
         ty
@@ -204,8 +210,8 @@ impl TypeTable {
         self.declared.iter()
     }
 
-    fn push(&mut self, name: String, details: OnceLock<TypeDetails>) -> Arc<Type> {
-        let ty = Arc::new(Type { name, details });
+    fn push(&mut self, ty: Type) -> Arc<Type> {
+        let ty = Arc::new(ty);
         self.types.push(Arc::clone(&ty));
         ty
     }
