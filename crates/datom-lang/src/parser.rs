@@ -1,15 +1,15 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, range::Range};
 
 use crate::{
-    Collection, Primitive,
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
+    types::{Collection, Primitive},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct Program {
-    statements: Vec<Statement>,
+    pub(crate) statements: Vec<Statement>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,8 +20,8 @@ pub(crate) enum Statement {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct TypeConstructor {
-    name: Token,
-    fields: TypeFields,
+    pub(crate) name: Token,
+    pub(crate) fields: TypeFields,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -36,8 +36,8 @@ pub(crate) type TypeFields = Vec<TypeField>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct TypeField {
-    name: Token,
-    ty: TypeName,
+    pub(crate) name: Token,
+    pub(crate) ty: TypeName,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -197,18 +197,23 @@ where
             let _semi = self.expect(TokenKind::Semicolon)?;
             Ok(TypeStatement::InlineVariadic((ident, tys)))
         } else {
-            let actual = match self.tokens.next() {
-                Some(token) => match token {
-                    Ok(token) => Some(token.kind),
-                    Err(_) => None,
-                },
-                None => None,
+            let actual = self.tokens.next().transpose()?;
+            let range = match actual {
+                Some(token) => token.range,
+                None => self.eof(),
             };
 
-            Err(
-                ParseError::Expected(vec![TokenKind::LeftParen, TokenKind::LeftCurly], actual)
-                    .into(),
-            )
+            Err(self.report(
+                ParseError::Expected(
+                    vec![
+                        TokenKind::LeftParen,
+                        TokenKind::LeftCurly,
+                        TokenKind::Equals,
+                    ],
+                    actual.map(|token| token.kind),
+                ),
+                range,
+            ))
         }
     }
 
@@ -354,44 +359,50 @@ where
         self.tokens.next().unwrap()
     }
 
-    /// Advance the iterator only if the peeked token matches the specified kind.
-    fn advance_if(&mut self, kind: TokenKind) -> Result<Option<Token>, CompileError> {
-        if self.is_next(&[kind]) {
-            Ok(Some(self.advance_unchecked()?))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Advance the iterator and confirm the received token is of the expected kind. Returns
     /// a ParseError if the token is not the right kind.
     fn expect(&mut self, kind: TokenKind) -> Result<Token, CompileError> {
-        if let Some(next_token) = self.tokens.next() {
-            let next_token = next_token?;
-
-            if next_token.kind == kind {
-                Ok(next_token)
-            } else {
-                Err(ParseError::Expected(vec![kind], Some(next_token.kind)).into())
-            }
-        } else {
-            Err(ParseError::Expected(vec![kind], Some(TokenKind::Eof)).into())
+        match self.tokens.next().transpose()? {
+            Some(token) if token.kind == kind => Ok(token),
+            Some(token) => Err(self.report(
+                ParseError::Expected(vec![kind], Some(token.kind)),
+                token.range,
+            )),
+            None => Err(self.report(
+                ParseError::Expected(vec![kind], Some(TokenKind::Eof)),
+                self.eof(),
+            )),
         }
     }
 
     fn expect_any(&mut self, kinds: &[TokenKind]) -> Result<Token, CompileError> {
-        if let Some(next_token) = self.tokens.next() {
-            let next_token = next_token?;
+        match self.tokens.next().transpose()? {
+            Some(token) if kinds.contains(&token.kind) => Ok(token),
+            Some(token) => Err(self.report(
+                ParseError::Expected(Vec::from(kinds), Some(token.kind)),
+                token.range,
+            )),
+            None => Err(self.report(
+                ParseError::Expected(Vec::from(kinds), Some(TokenKind::Eof)),
+                self.eof(),
+            )),
+        }
+    }
 
-            for expected in kinds {
-                if next_token.kind == *expected {
-                    return Ok(next_token);
-                }
-            }
+    /// Records `error` against `range` and hands it back, ready to bubble up.
+    ///
+    /// Parse errors go through the same sink the scanner reports to, so every
+    /// failure reaches the user positioned rather than bare.
+    fn report(&self, error: ParseError, range: Range<usize>) -> CompileError {
+        self.diag.error(error.to_string(), range.start, range.end);
+        error.into()
+    }
 
-            Err(ParseError::Expected(Vec::from(kinds), Some(next_token.kind)).into())
-        } else {
-            Err(ParseError::Expected(Vec::from(kinds), Some(TokenKind::Eof)).into())
+    /// The range an error that ran out of tokens points to.
+    fn eof(&self) -> Range<usize> {
+        Range {
+            start: self.source.len(),
+            end: self.source.len(),
         }
     }
 }
@@ -399,6 +410,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::type_name;
     use std::collections::VecDeque;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -414,7 +426,6 @@ mod tests {
         NumberExpr,
         StringExpr,
         BoolExpr,
-        BinaryExpr,
         PlusOperator,
         MinusOperator,
         StarOperator,
@@ -439,7 +450,7 @@ mod tests {
                 lexeme: format!(
                     "{}: {}",
                     self.name.lexeme(source),
-                    format_type_name(source, self.ty)
+                    type_name(source, &self.ty)
                 ),
             }]
         }
@@ -508,17 +519,6 @@ mod tests {
         }
     }
 
-    fn format_type_name(source: &str, type_name: TypeName) -> String {
-        match type_name {
-            TypeName::Concrete(token) => token.lexeme(source).to_string(),
-            TypeName::Generic { collection, over } => format!(
-                "{}<{}>",
-                collection.lexeme(source),
-                format_type_name(source, *over)
-            ),
-        }
-    }
-
     // NF: I am not in love with the format for the nodes or how this works, but writing
     // the assertions against a Vec<Node> is **much** nicer than writing a raw expected AST.
     fn bfs(source: &str, program: &Program) -> Vec<Node> {
@@ -577,7 +577,7 @@ mod tests {
                             for ty in tys {
                                 out.push(Node {
                                     kind: NodeKind::TypeName,
-                                    lexeme: format_type_name(source, ty),
+                                    lexeme: type_name(source, &ty),
                                 })
                             }
                         }

@@ -6,6 +6,7 @@ use crate::scanner::TokenKind;
 pub(crate) enum CompileError {
     Scan(ScanError),
     Parse(ParseError),
+    Lower(LowerError),
 }
 
 impl Display for CompileError {
@@ -13,6 +14,7 @@ impl Display for CompileError {
         match self {
             Self::Scan(err) => write!(f, "{}", err),
             Self::Parse(err) => write!(f, "{}", err),
+            Self::Lower(err) => write!(f, "{}", err),
         }
     }
 }
@@ -22,6 +24,7 @@ impl Error for CompileError {
         match self {
             Self::Scan(err) => Some(err),
             Self::Parse(err) => Some(err),
+            Self::Lower(err) => Some(err),
         }
     }
 }
@@ -38,6 +41,12 @@ impl From<ParseError> for CompileError {
     }
 }
 
+impl From<LowerError> for CompileError {
+    fn from(value: LowerError) -> Self {
+        CompileError::Lower(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScanError {
     UnexpectedChar,
@@ -47,8 +56,8 @@ pub(crate) enum ScanError {
 impl Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnexpectedChar => write!(f, "unexpected character"),
-            Self::UnterminatedString => write!(f, "unterminated string"),
+            Self::UnexpectedChar => write!(f, "Unexpected character"),
+            Self::UnterminatedString => write!(f, "Unterminated string"),
         }
     }
 }
@@ -65,7 +74,7 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Expected(expected, actual) => {
-                f.write_str("expected ")?;
+                f.write_str("Expected ")?;
 
                 for (i, kind) in expected.iter().enumerate() {
                     let separator = match i {
@@ -93,15 +102,38 @@ impl Display for ParseError {
 
 impl Error for ParseError {}
 
+/// A failure to turn a well-formed syntax tree into the semantic type model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LowerError {
+    /// A type name no declaration in scope introduces.
+    UnknownType(String),
+    /// A second declaration claiming a name already taken.
+    DuplicateType(String),
+    /// A field name the record already has.
+    DuplicateField(String),
+}
+
+impl Display for LowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownType(name) => write!(f, "Unknown type `{name}`"),
+            Self::DuplicateType(name) => write!(f, "Duplicate type `{name}`"),
+            Self::DuplicateField(name) => write!(f, "Duplicate field `{name}`"),
+        }
+    }
+}
+
+impl Error for LowerError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Primitive, scanner::Keyword};
+    use crate::{scanner::Keyword, types::Primitive};
 
     #[test]
     fn a_single_expected_kind_reads_as_a_sentence() {
         let err = ParseError::Expected(vec![TokenKind::Identifier], Some(TokenKind::LeftCurly));
-        assert_eq!(err.to_string(), "expected an identifier, found `{`");
+        assert_eq!(err.to_string(), "Expected an identifier, found `{`");
     }
 
     #[test]
@@ -114,18 +146,18 @@ mod tests {
             ],
             Some(TokenKind::Keyword(Keyword::Primitive(Primitive::Number))),
         );
-        assert_eq!(err.to_string(), "expected `(`, `{` or `=`, found `number`");
+        assert_eq!(err.to_string(), "Expected `(`, `{` or `=`, found `number`");
     }
 
     #[test]
     fn running_out_of_tokens_is_reported_as_eof() {
         let err = ParseError::Expected(vec![TokenKind::Semicolon], Some(TokenKind::Eof));
-        assert_eq!(err.to_string(), "expected `;`, found <EOF>");
+        assert_eq!(err.to_string(), "Expected `;`, found <EOF>");
     }
 
     #[test]
     fn a_missing_actual_token_is_reported_as_nothing() {
         let err = ParseError::Expected(vec![TokenKind::Semicolon], None);
-        assert_eq!(err.to_string(), "expected `;`, found nothing");
+        assert_eq!(err.to_string(), "Expected `;`, found nothing");
     }
 }

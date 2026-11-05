@@ -370,6 +370,7 @@ dependencies = [
  "clap",
  "datom-core",
  "dialoguer",
+ "lang",
  "serde_json",
  "tempfile",
  "tokio",

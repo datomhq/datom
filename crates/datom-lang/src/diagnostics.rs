@@ -3,6 +3,7 @@ use std::{cell::RefCell, fmt::Display, range::Range};
 /// The severity level for the diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Severity {
+    #[allow(dead_code)]
     Warning,
     Error,
 }
@@ -37,6 +38,7 @@ impl Diagnostics {
         Self::default()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn warn(&self, message: impl Into<String>, start: usize, end: usize) {
         self.track(Severity::Warning, message.into(), Range { start, end });
     }
@@ -46,6 +48,7 @@ impl Diagnostics {
     }
 
     /// Returns true if no diagnostics have been emitted.
+    #[allow(dead_code)]
     pub(crate) fn is_ok(&self) -> bool {
         self.diagnostics.borrow().is_empty()
     }
@@ -60,7 +63,7 @@ impl Diagnostics {
 
             out.push_str(
                 format!(
-                    "[{line}:{col}] {}: {}",
+                    "[{line}:{col}] {}: {}\n",
                     diagnostic.severity, diagnostic.message
                 )
                 .as_str(),
@@ -85,10 +88,10 @@ struct Location {
     col: usize,
 }
 
-/// Returns the line and column of the start of the specified range in source.
+/// Returns the 1-based line and column of the start of the specified range in source.
 fn line_and_col(source: &str, range: Range<usize>) -> Location {
     let mut line = 1;
-    let mut col = 0;
+    let mut col = 1;
 
     for (i, char) in source.chars().enumerate() {
         if i == range.start {
@@ -97,10 +100,32 @@ fn line_and_col(source: &str, range: Range<usize>) -> Location {
 
         if char == '\n' {
             line += 1;
+            col = 1;
         } else {
             col += 1;
         }
     }
 
     Location { line, col }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_character_sits_at_one_one() {
+        let diagnostics = Diagnostics::new();
+        diagnostics.error("bad start", 0, 1);
+        assert_eq!(diagnostics.render("#"), "[1:1] error: bad start\n");
+    }
+
+    #[test]
+    fn a_later_line_counts_columns_from_its_own_start() {
+        let source = "type A(id: number)\ntype B(#: bool)";
+        let diagnostics = Diagnostics::new();
+        diagnostics.error("bad field", 26, 27);
+
+        assert_eq!(diagnostics.render(source), "[2:8] error: bad field\n");
+    }
 }
