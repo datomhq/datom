@@ -1,4 +1,4 @@
-use std::{fmt::Display, iter::Peekable, range::Range, str::Chars};
+use std::{fmt::Display, iter::Peekable, range::Range, str::CharIndices};
 
 use crate::{
     diagnostics::Diagnostics,
@@ -112,10 +112,8 @@ pub(crate) fn scan(
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 enum ScannerState {
-    /// The scanner has been initialized but scanning has not comenced yet.
-    #[default]
-    Start,
     /// The scanner is mid-input and scanning characters.
+    #[default]
     Scanning,
     /// The scanner has processed all characters and has yielded the Eof token.
     Exhausted,
@@ -125,7 +123,7 @@ enum ScannerState {
 
 struct Scanner<'s, 'd> {
     source: &'s str,
-    chars: Peekable<Chars<'s>>,
+    chars: Peekable<CharIndices<'s>>,
     diag: &'d Diagnostics,
     offset: usize,
     state: ScannerState,
@@ -135,7 +133,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
     fn new(source: &'s str, diagnostics: &'d Diagnostics) -> Self {
         Self {
             source,
-            chars: source.chars().peekable(),
+            chars: source.char_indices().peekable(),
             diag: diagnostics,
             offset: 0,
             state: ScannerState::default(),
@@ -143,22 +141,21 @@ impl<'s, 'd> Scanner<'s, 'd> {
     }
 
     fn advance(&mut self) -> Option<char> {
-        // on the first call to advance, don't increment offset
-        // this is because offset starts at 0 but chars starts _before_ the first char (i.e. index -1)
-        // and since offset is a usize, it can't store -1
-        if self.state == ScannerState::Start {
-            self.state = ScannerState::Scanning;
-        } else {
-            self.offset += 1;
-        }
-
-        self.chars.next()
+        let (offset, char) = self.chars.next()?;
+        self.offset = offset;
+        Some(char)
     }
 
     fn advance_while(&mut self, predicate: impl Fn(char) -> bool) {
-        while self.chars.peek().is_some_and(|&c| predicate(c)) {
+        while self.chars.peek().is_some_and(|&(_, c)| predicate(c)) {
             self.advance();
         }
+    }
+
+    fn end(&mut self) -> usize {
+        self.chars
+            .peek()
+            .map_or(self.source.len(), |&(offset, _)| offset)
     }
 
     fn ident_or_keyword(&mut self) -> Token {
@@ -166,7 +163,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
 
         self.advance_while(|c| c.is_alphanumeric() || c == '_');
 
-        let end = self.offset + 1;
+        let end = self.end();
         let ident = &self.source[start..end];
 
         let kind = match ident {
@@ -191,19 +188,14 @@ impl<'s, 'd> Scanner<'s, 'd> {
 
         self.advance_while(|c| c != '"');
 
-        match self.chars.next() {
+        match self.advance() {
             None => {
                 self.diag
-                    .error("Unterminated string literal", start, self.offset + 1);
+                    .error("Unterminated string literal", start, self.source.len());
 
                 Err(ScanError::UnterminatedString.into())
             }
-            Some(_) => {
-                // update the offset to match the call to next
-                self.offset += 1;
-
-                Ok(Token::new(TokenKind::String, start, self.offset + 1))
-            }
+            Some(_) => Ok(Token::new(TokenKind::String, start, self.end())),
         }
     }
 
@@ -213,7 +205,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
         // underscores are supported as arbitrary separators
         self.advance_while(|c| c.is_ascii_digit() || c == '_' || c == '.');
 
-        let end = self.offset + 1;
+        let end = self.end();
 
         Token::new(TokenKind::Number, start, end)
     }
@@ -228,7 +220,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
             ScannerState::Failed | ScannerState::Exhausted => None,
 
             // otherwise, keep scanning
-            ScannerState::Start | ScannerState::Scanning => {
+            ScannerState::Scanning => {
                 while let Some(char) = self.advance() {
                     let token = match char {
                         '=' => Token::new(TokenKind::Equals, self.offset, self.offset + 1),
@@ -252,10 +244,11 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
+                            let end = self.end();
                             self.diag.error(
                                 format!("Unexpected character '{}'", char),
                                 self.offset,
-                                self.offset + 1,
+                                end,
                             );
 
                             self.state = ScannerState::Failed;
@@ -267,7 +260,8 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                 }
 
                 self.state = ScannerState::Exhausted;
-                Some(Ok(Token::new(TokenKind::Eof, self.offset, self.offset)))
+                let eof = self.source.len();
+                Some(Ok(Token::new(TokenKind::Eof, eof, eof)))
             }
         }
     }
@@ -620,6 +614,37 @@ mod tests {
             source,
             iter,
             &[(TokenKind::Number, "1_000.23"), (TokenKind::Eof, "")],
+        );
+    }
+
+    #[test]
+    fn a_non_ascii_string_does_not_shift_the_tokens_after_it() {
+        let source = "\"héllo\" true 12";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[
+                (TokenKind::String, "\"héllo\""),
+                (TokenKind::Keyword(Keyword::True), "true"),
+                (TokenKind::Number, "12"),
+                (TokenKind::Eof, ""),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_non_ascii_identifier_keeps_its_whole_characters() {
+        let source = "Café";
+        let diagnostics = Diagnostics::new();
+        let iter = scan(source, &diagnostics);
+
+        assert_tokens(
+            source,
+            iter,
+            &[(TokenKind::Identifier, "Café"), (TokenKind::Eof, "")],
         );
     }
 }
