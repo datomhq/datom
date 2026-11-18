@@ -4,16 +4,16 @@
 //! identifier `Address`, a range into the source. Nothing in the tree says
 //! whether `Address` was ever declared or what it holds. This pass resolves
 //! those names against the declarations around them and fills in the
-//! [`TypeTable`] in [`crate::types`], where a field holds the id of its type.
+//! [`TypeTable`] in [`crate::types`], where a field holds a reference to its type.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     diagnostics::Diagnostics,
     error::{CompileError, LowerError},
     parser::{Program, Statement, TypeFields, TypeName, TypeStatement},
     scanner::{Keyword, Token, TokenKind},
-    types::{Fields, Sum, TypeId, TypeTable},
+    types::{Fields, Sum, Type, TypeRef, TypeTable},
 };
 
 /// Lower every type declaration in `program`, in declaration order.
@@ -35,7 +35,7 @@ struct Lowering<'s, 'd> {
     source: &'s str,
     diag: &'d Diagnostics,
     /// Every type declared so far by name.
-    scope: HashMap<&'s str, TypeId>,
+    scope: HashMap<&'s str, Arc<Type>>,
     table: TypeTable,
 }
 
@@ -52,18 +52,18 @@ impl<'s> Lowering<'s, '_> {
         Ok(self.table.finish())
     }
 
-    /// Lower a declaration into the id its name was reserved.
+    /// Lower a declaration into the type its name reserved.
     fn type_statement(&mut self, declaration: &TypeStatement) -> Result<(), CompileError> {
-        let (id, sum) = match declaration {
+        let (ty, sum) = match declaration {
             TypeStatement::Single(constructor) => {
-                let id = self.declare(&constructor.name)?;
+                let ty = self.declare(&constructor.name)?;
                 let fields = self.fields(&constructor.fields)?;
 
-                (id, Sum::Single(fields))
+                (ty, Sum::Single(fields))
             }
 
             TypeStatement::Variadic((token, constructors)) => {
-                let id = self.declare(token)?;
+                let ty = self.declare(token)?;
 
                 let mut variants = Vec::with_capacity(constructors.len());
                 for constructor in constructors {
@@ -73,37 +73,37 @@ impl<'s> Lowering<'s, '_> {
                     ));
                 }
 
-                (id, Sum::Variadic(variants))
+                (ty, Sum::Variadic(variants))
             }
 
             TypeStatement::InlineVariadic((token, names)) => {
-                let id = self.declare(token)?;
+                let ty = self.declare(token)?;
 
                 let mut variants = Vec::with_capacity(names.len());
                 for type_name in names {
                     variants.push(self.type_name(type_name)?);
                 }
 
-                (id, Sum::InlineVariadic(variants))
+                (ty, Sum::InlineVariadic(variants))
             }
         };
 
-        self.table.define(id, sum);
+        self.table.define(&ty, sum);
         Ok(())
     }
 
     /// Bring the name `token` introduces into scope before its body is
     /// lowered, so the body can name it. Rejects a name already declared.
-    fn declare(&mut self, token: &Token) -> Result<TypeId, CompileError> {
+    fn declare(&mut self, token: &Token) -> Result<Arc<Type>, CompileError> {
         let name = token.lexeme(self.source);
 
         if self.scope.contains_key(name) {
             return Err(self.report(LowerError::DuplicateType(name.to_string()), token));
         }
 
-        let id = self.table.declare(name);
-        self.scope.insert(name, id);
-        Ok(id)
+        let ty = self.table.declare(name);
+        self.scope.insert(name, Arc::clone(&ty));
+        Ok(ty)
     }
 
     /// Lower a constructor's fields.
@@ -122,12 +122,12 @@ impl<'s> Lowering<'s, '_> {
         Ok(lowered)
     }
 
-    /// Resolve a written type name to the id it denotes.
-    fn type_name(&mut self, name: &TypeName) -> Result<TypeId, CompileError> {
+    /// Resolve a written type name to a reference to the type it denotes.
+    fn type_name(&mut self, name: &TypeName) -> Result<TypeRef, CompileError> {
         match name {
             TypeName::Concrete(token) => match token.kind {
                 TokenKind::Keyword(Keyword::Primitive(primitive)) => {
-                    Ok(self.table.primitive(primitive))
+                    Ok(TypeRef::new(&self.table.primitive(primitive)))
                 }
                 // Anything else in this position is written as a name, and
                 // has to have been declared under it.
@@ -147,17 +147,20 @@ impl<'s> Lowering<'s, '_> {
                 };
 
                 let inner = self.type_name(over)?;
-                Ok(self.table.collection(kind, inner))
+                Ok(TypeRef::new(&self.table.collection(kind, inner)))
             }
         }
     }
 
-    /// The id `token` names, which a declaration must have introduced.
-    fn declared(&self, token: &Token) -> Result<TypeId, CompileError> {
+    /// The type `token` names, which a declaration must have introduced.
+    ///
+    /// A type still being lowered has no body yet, so naming it from inside
+    /// that body yields a weak reference rather than an `Arc` cycle.
+    fn declared(&self, token: &Token) -> Result<TypeRef, CompileError> {
         let name = token.lexeme(self.source);
 
         match self.scope.get(name) {
-            Some(id) => Ok(*id),
+            Some(ty) => Ok(TypeRef::new(ty)),
             None => Err(self.report(LowerError::UnknownType(name.to_string()), token)),
         }
     }
@@ -190,25 +193,26 @@ mod tests {
             .map_err(|_| diag.render(source))
     }
 
-    /// The id declared under `name`, or a panic.
-    fn nominal(table: &TypeTable, name: &str) -> TypeId {
+    /// The type declared under `name`, or a panic.
+    fn nominal(table: &TypeTable, name: &str) -> Arc<Type> {
         table
             .iter()
-            .find(|id| table.name_of(*id) == name)
+            .find(|ty| ty.name == name)
+            .cloned()
             .unwrap_or_else(|| panic!("no type named `{name}`"))
     }
 
     /// The single sum's fields, or a panic naming what was found instead.
-    fn single(table: &TypeTable, id: TypeId) -> &Fields {
-        match table.get(id).details() {
+    fn single(ty: &Type) -> &Fields {
+        match ty.details() {
             TypeDetails::Sum(Sum::Single(fields)) => fields,
             other => panic!("expected a single sum, found {other:?}"),
         }
     }
 
     /// A variadic sum's named variant, or a panic naming what was found instead.
-    fn variant<'t>(table: &'t TypeTable, id: TypeId, name: &str) -> &'t Fields {
-        match table.get(id).details() {
+    fn variant<'t>(ty: &'t Type, name: &str) -> &'t Fields {
+        match ty.details() {
             TypeDetails::Sum(Sum::Variadic(variants)) => variants
                 .iter()
                 .find(|(variant, _)| variant == name)
@@ -218,16 +222,11 @@ mod tests {
         }
     }
 
-    /// How `id` prints as a declaration.
-    fn rendered(table: &TypeTable, id: TypeId) -> String {
-        table.get(id).display(table).to_string()
-    }
-
     #[test]
     fn the_tour_lowers_every_declaration_in_order() {
         let table = lowered(include_str!("../samples/tour.datom")).expect("the tour must lower");
 
-        let names: Vec<&str> = table.iter().map(|id| table.name_of(id)).collect();
+        let names: Vec<&str> = table.iter().map(|ty| ty.name.as_str()).collect();
         assert_eq!(
             names,
             [
@@ -260,7 +259,7 @@ mod tests {
         let table = lowered("type Address(city: string)\ntype Person(home: Address)").unwrap();
 
         assert_eq!(
-            single(&table, nominal(&table, "Person"))["home"],
+            single(&nominal(&table, "Person"))["home"].get().unwrap(),
             nominal(&table, "Address")
         );
     }
@@ -268,17 +267,18 @@ mod tests {
     #[test]
     fn a_generic_lowers_to_a_collection_over_its_element() {
         let table = lowered("type Grid(cells: list<list<number>>)").unwrap();
-        let cells = single(&table, nominal(&table, "Grid"))["cells"];
+        let cells = single(&nominal(&table, "Grid"))["cells"].get().unwrap();
 
-        let TypeDetails::Collection(Collection::List, inner) = *table.get(cells).details() else {
-            panic!("expected a list, found {:?}", table.get(cells).details());
+        let TypeDetails::Collection(Collection::List, inner) = cells.details() else {
+            panic!("expected a list, found {:?}", cells.details());
         };
 
-        let TypeDetails::Collection(Collection::List, element) = *table.get(inner).details() else {
-            panic!("expected a list, found {:?}", table.get(inner).details());
+        let inner = inner.get().unwrap();
+        let TypeDetails::Collection(Collection::List, element) = inner.details() else {
+            panic!("expected a list, found {:?}", inner.details());
         };
 
-        assert_eq!(element, table.primitive(Primitive::Number));
+        assert_eq!(element.get().unwrap(), table.primitive(Primitive::Number));
     }
 
     #[test]
@@ -304,7 +304,7 @@ mod tests {
         let table = lowered("type Category(name: string, children: list<Category>)").unwrap();
 
         assert_eq!(
-            rendered(&table, nominal(&table, "Category")),
+            nominal(&table, "Category").to_string(),
             "type Category(children: list<Category>, name: string)"
         );
     }
@@ -315,7 +315,7 @@ mod tests {
             lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
 
         assert_eq!(
-            rendered(&table, nominal(&table, "Tree")),
+            nominal(&table, "Tree").to_string(),
             "type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }"
         );
     }
@@ -325,17 +325,40 @@ mod tests {
         let table = lowered("type Json = string | number | list<Json>;").unwrap();
 
         assert_eq!(
-            rendered(&table, nominal(&table, "Json")),
+            nominal(&table, "Json").to_string(),
             "type Json = string | number | list<Json>;"
         );
     }
 
     #[test]
-    fn a_self_reference_holds_the_type_s_own_id() {
+    fn a_self_reference_holds_the_type_itself() {
         let table = lowered("type Node(value: number, next: Node)").unwrap();
         let node = nominal(&table, "Node");
 
-        assert_eq!(single(&table, node)["next"], node);
+        assert_eq!(single(&node)["next"].get().unwrap(), node);
+    }
+
+    #[test]
+    fn a_self_reference_does_not_keep_its_type_alive() {
+        let table = lowered("type Category(name: string, children: list<Category>)").unwrap();
+        let category = Arc::downgrade(&nominal(&table, "Category"));
+
+        drop(table);
+
+        assert!(category.upgrade().is_none());
+    }
+
+    #[test]
+    fn a_collection_outliving_its_self_referencing_type_finds_it_dropped() {
+        let table = lowered("type Tree(children: list<Tree>)").unwrap();
+        let children = single(&nominal(&table, "Tree"))["children"].get().unwrap();
+
+        drop(table);
+
+        let TypeDetails::Collection(Collection::List, inner) = children.details() else {
+            panic!("expected a list, found {:?}", children.details());
+        };
+        assert!(inner.get().is_none());
     }
 
     #[test]
@@ -344,10 +367,10 @@ mod tests {
             lowered("type Tree { Leaf(value: number), Branch(left: Tree, right: Tree) }").unwrap();
 
         let tree = nominal(&table, "Tree");
-        let branch = variant(&table, tree, "Branch");
+        let branch = variant(&tree, "Branch");
 
-        assert_eq!(branch["left"], tree);
-        assert_eq!(branch["right"], tree);
+        assert_eq!(branch["left"].get().unwrap(), tree);
+        assert_eq!(branch["right"].get().unwrap(), tree);
     }
 
     #[test]

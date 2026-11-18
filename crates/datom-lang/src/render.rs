@@ -12,7 +12,7 @@ use crate::types::TypeTable;
 pub fn render_types(table: &TypeTable) -> String {
     table
         .iter()
-        .map(|id| format!("{}\n", table.get(id).display(table)))
+        .map(|ty| format!("{ty}\n"))
         .collect::<Vec<_>>()
         .join("\n")
 }
