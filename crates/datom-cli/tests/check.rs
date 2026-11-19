@@ -91,6 +91,22 @@ fn a_failed_parse_writes_nothing_to_stdout() {
 }
 
 #[test]
+fn a_non_ascii_name_is_checked_without_panicking() {
+    let dir = tempdir().unwrap();
+    let output = check(dir.path(), "type Café(prix: number)\n");
+
+    assert!(output.status.success());
+    assert_eq!(
+        stdout(&output),
+        "\
+program
+└─ single type `Café`
+   └─ field `prix`: number
+"
+    );
+}
+
+#[test]
 fn a_missing_file_fails_without_mentioning_syntax() {
     let dir = tempdir().unwrap();
     let missing = dir.path().join("nope.datom");

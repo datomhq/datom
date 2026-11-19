@@ -93,7 +93,7 @@ fn line_and_col(source: &str, range: Range<usize>) -> Location {
     let mut line = 1;
     let mut col = 1;
 
-    for (i, char) in source.chars().enumerate() {
+    for (i, char) in source.char_indices() {
         if i == range.start {
             break;
         }
@@ -127,5 +127,14 @@ mod tests {
         diagnostics.error("bad field", 26, 27);
 
         assert_eq!(diagnostics.render(source), "[2:8] error: bad field\n");
+    }
+
+    #[test]
+    fn a_multi_byte_character_counts_as_one_column() {
+        let source = "\"é\" #";
+        let diagnostics = Diagnostics::new();
+        diagnostics.error("bad", 5, 6);
+
+        assert_eq!(diagnostics.render(source), "[1:5] error: bad\n");
     }
 }
