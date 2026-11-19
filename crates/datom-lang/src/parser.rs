@@ -656,10 +656,14 @@ mod tests {
                         }
                     }
                 }
-                Statement::Assignment(stmt) => out.push(Node {
-                    kind: NodeKind::AssignmentStatement,
-                    lexeme: stmt.lexeme(source).to_string(),
-                }),
+                Statement::Assignment(stmt) => {
+                    out.push(Node {
+                        kind: NodeKind::AssignmentStatement,
+                        lexeme: stmt.lexeme(source).to_string(),
+                    });
+
+                    queue.push_back(Statement::Expr(stmt.value));
+                }
                 Statement::Expr(expr) => {
                     out.push(Node {
                         kind: NodeKind::ExprStatement,
@@ -1128,10 +1132,20 @@ mod tests {
         assert_nodes(
             source,
             &program.unwrap(),
-            &[Node {
-                kind: NodeKind::AssignmentStatement,
-                lexeme: String::from("let x = 1;"),
-            }],
+            &[
+                Node {
+                    kind: NodeKind::AssignmentStatement,
+                    lexeme: String::from("let x = 1;"),
+                },
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::from(""),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("1"),
+                },
+            ],
         );
     }
 
@@ -1142,10 +1156,6 @@ mod tests {
         let diagnostics = Diagnostics::new();
         let tokens = crate::scanner::scan(source, &diagnostics);
         let program = parse(source, &diagnostics, tokens);
-
-        if let Err(e) = &program {
-            eprintln!("{e}");
-        }
 
         assert!(program.is_ok());
         assert!(diagnostics.is_ok());
@@ -1164,6 +1174,38 @@ mod tests {
                 Node {
                     kind: NodeKind::AssignmentStatement,
                     lexeme: String::from("let z = x + y;"),
+                },
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::from(""),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("1"),
+                },
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::from(""),
+                },
+                Node {
+                    kind: NodeKind::NumberExpr,
+                    lexeme: String::from("2"),
+                },
+                Node {
+                    kind: NodeKind::ExprStatement,
+                    lexeme: String::from(""),
+                },
+                Node {
+                    kind: NodeKind::PlusOperator,
+                    lexeme: String::from("+"),
+                },
+                Node {
+                    kind: NodeKind::VariableExpr,
+                    lexeme: String::from("x"),
+                },
+                Node {
+                    kind: NodeKind::VariableExpr,
+                    lexeme: String::from("y"),
                 },
             ],
         );

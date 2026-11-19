@@ -15,7 +15,7 @@ pub(crate) type TypedExprStmt = ExprStmt<TypedExpr>;
 pub(crate) struct Assignment<ExprT> {
     location: SrcSpan,
     variable: String,
-    value: ExprT,
+    pub value: ExprT,
 }
 
 pub(crate) type UntypedAssignment = Assignment<UntypedExpr>;
@@ -31,7 +31,7 @@ impl<ExprT> Assignment<ExprT> {
     }
 
     pub fn lexeme<'src>(&self, source: &'src str) -> &'src str {
-        return self.location.lexeme(source);
+        self.location.lexeme(source)
     }
 }
 
