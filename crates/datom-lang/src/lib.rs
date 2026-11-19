@@ -7,8 +7,8 @@ pub(crate) mod parser;
 pub(crate) mod render;
 pub(crate) mod scanner;
 pub(crate) mod tree;
-pub mod types;
 
+pub use datom_core::types;
 pub use render::render_types;
 
 /// The diagnostics from a compilation that failed, one per line.
