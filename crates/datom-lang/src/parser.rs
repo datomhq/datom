@@ -2,7 +2,7 @@ use std::iter::Peekable;
 
 use crate::{
     Collection, Primitive,
-    ast::{BinOp, NumberLiteral, UnaryOp, UntypedExpr},
+    ast::{BinOp, NumberLiteral, UnaryOp, UntypedAssignment, UntypedExpr},
     diagnostics::Diagnostics,
     error::{CompileError, ParseError},
     scanner::{Keyword, Token, TokenKind},
@@ -16,6 +16,7 @@ pub(crate) struct Program {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Statement {
     Type(TypeStatement),
+    Assignment(UntypedAssignment),
     Expr(UntypedExpr),
 }
 
@@ -76,6 +77,7 @@ const PRIMARY_KINDS: &[TokenKind] = &[
     TokenKind::String,
     TokenKind::Keyword(Keyword::True),
     TokenKind::Keyword(Keyword::False),
+    TokenKind::Identifier,
 ];
 
 pub(crate) fn parse(
@@ -133,6 +135,9 @@ where
             self.advance_unchecked()?;
             let stmt = self.type_statement()?;
             Ok(Statement::Type(stmt))
+        } else if self.is_next(&[TokenKind::Keyword(Keyword::Let)]) {
+            let stmt = self.assignment_statement()?;
+            Ok(Statement::Assignment(stmt))
         } else {
             let expr = self.expr()?;
             let _semicolon = self.expect(TokenKind::Semicolon)?;
@@ -222,7 +227,7 @@ where
 
     fn type_constructor(&mut self) -> Result<TypeConstructor, CompileError> {
         let ident = self.expect(TokenKind::Identifier)?;
-        let _left_paren = self.advance_unchecked()?;
+        let _left_paren = self.expect(TokenKind::LeftParen)?;
         let fields = self.type_fields()?;
         let _right_paren = self.expect(TokenKind::RightParen)?;
 
@@ -256,8 +261,23 @@ where
         Ok(TypeField { name, ty })
     }
 
+    fn assignment_statement(&mut self) -> Result<UntypedAssignment, CompileError> {
+        // the caller has already checked the let keyword comes next
+        let let_keyword = self.advance_unchecked()?;
+        let ident = self.expect(TokenKind::Identifier)?;
+        let _equals = self.expect(TokenKind::Equals)?;
+        let value = self.expr()?;
+        let semi = self.expect(TokenKind::Semicolon)?;
+
+        Ok(UntypedAssignment::new(
+            let_keyword.location.merge(&semi.location),
+            ident.lexeme(self.source).to_string(),
+            value,
+        ))
+    }
+
     fn expr(&mut self) -> Result<UntypedExpr, CompileError> {
-        return self.term();
+        self.term()
     }
 
     fn term(&mut self) -> Result<UntypedExpr, CompileError> {
@@ -332,7 +352,7 @@ where
             });
         }
 
-        return self.primary();
+        self.primary()
     }
 
     fn primary(&mut self) -> Result<UntypedExpr, CompileError> {
@@ -358,6 +378,9 @@ where
             TokenKind::Keyword(Keyword::True | Keyword::False) => UntypedExpr::Bool {
                 location: token.location,
                 value: token.kind == TokenKind::Keyword(Keyword::True),
+            },
+            TokenKind::Identifier => UntypedExpr::Variable {
+                location: token.location,
             },
             _ => return Err(ParseError::Unexpected(Some(token.kind)).into()),
         };
@@ -441,6 +464,7 @@ mod tests {
         TypeConstructor,
         TypeField,
         TypeName,
+        AssignmentStatement,
         ExprStatement,
         NumberExpr,
         StringExpr,
@@ -451,6 +475,7 @@ mod tests {
         StarOperator,
         SlashOperator,
         BangOperator,
+        VariableExpr,
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -489,6 +514,10 @@ mod tests {
                 }],
                 UntypedExpr::Bool { location, .. } => vec![Node {
                     kind: NodeKind::BoolExpr,
+                    lexeme: String::from(location.lexeme(source)),
+                }],
+                UntypedExpr::Variable { location } => vec![Node {
+                    kind: NodeKind::VariableExpr,
                     lexeme: String::from(location.lexeme(source)),
                 }],
                 UntypedExpr::BinOp {
@@ -627,6 +656,10 @@ mod tests {
                         }
                     }
                 }
+                Statement::Assignment(stmt) => out.push(Node {
+                    kind: NodeKind::AssignmentStatement,
+                    lexeme: stmt.lexeme(source).to_string(),
+                }),
                 Statement::Expr(expr) => {
                     out.push(Node {
                         kind: NodeKind::ExprStatement,
@@ -1077,6 +1110,60 @@ mod tests {
                 Node {
                     kind: NodeKind::BoolExpr,
                     lexeme: String::from("true"),
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn assignment() {
+        let source = "let x = 1;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[Node {
+                kind: NodeKind::AssignmentStatement,
+                lexeme: String::from("let x = 1;"),
+            }],
+        );
+    }
+
+    #[test]
+    fn multiple_statements() {
+        let source = "let x = 1; let y = 2; let z = x + y;";
+
+        let diagnostics = Diagnostics::new();
+        let tokens = crate::scanner::scan(source, &diagnostics);
+        let program = parse(source, &diagnostics, tokens);
+
+        if let Err(e) = &program {
+            eprintln!("{e}");
+        }
+
+        assert!(program.is_ok());
+        assert!(diagnostics.is_ok());
+        assert_nodes(
+            source,
+            &program.unwrap(),
+            &[
+                Node {
+                    kind: NodeKind::AssignmentStatement,
+                    lexeme: String::from("let x = 1;"),
+                },
+                Node {
+                    kind: NodeKind::AssignmentStatement,
+                    lexeme: String::from("let y = 2;"),
+                },
+                Node {
+                    kind: NodeKind::AssignmentStatement,
+                    lexeme: String::from("let z = x + y;"),
                 },
             ],
         );

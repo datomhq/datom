@@ -57,6 +57,7 @@ impl Display for TokenKind {
                 Keyword::False => "`false`",
                 Keyword::Primitive(primitive) => return write!(f, "`{primitive}`"),
                 Keyword::Collection(collection) => return write!(f, "`{collection}`"),
+                Keyword::Let => "`let`",
             },
             TokenKind::Identifier => "an identifier",
             TokenKind::String => "a string",
@@ -75,6 +76,7 @@ pub(crate) enum Keyword {
     Collection(Collection),
     True,
     False,
+    Let,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +183,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
             "list" => TokenKind::Keyword(Keyword::Collection(Collection::List)),
             "map" => TokenKind::Keyword(Keyword::Collection(Collection::Map)),
             "set" => TokenKind::Keyword(Keyword::Collection(Collection::Set)),
+            "let" => TokenKind::Keyword(Keyword::Let),
             _ => TokenKind::Identifier,
         };
 
@@ -212,7 +215,7 @@ impl<'s, 'd> Scanner<'s, 'd> {
         let start = self.offset;
 
         // underscores are supported as arbitrary separators
-        self.advance_while(|c| c.is_digit(10) || c == '_' || c == '.');
+        self.advance_while(|c| c.is_ascii_digit() || c == '_' || c == '.');
 
         let end = self.offset + 1;
 
@@ -249,7 +252,7 @@ impl<'s, 'd> Iterator for Scanner<'s, 'd> {
                         '*' => Token::new(TokenKind::Star, self.offset, self.offset + 1),
                         '/' => Token::new(TokenKind::Slash, self.offset, self.offset + 1),
                         '"' => return Some(self.string()),
-                        _ if char.is_digit(10) => self.number(),
+                        _ if char.is_ascii_digit() => self.number(),
                         _ if char.is_alphabetic() => self.ident_or_keyword(),
                         _ if char.is_whitespace() => continue,
                         _ => {
@@ -350,7 +353,7 @@ mod tests {
 
     #[test]
     fn keywords() {
-        let source = "type true false string number bool datetime list map set";
+        let source = "type true false string number bool datetime list map set let";
         let diagnostics = Diagnostics::new();
         let iter = scan(source, &diagnostics);
         assert_tokens(
@@ -388,6 +391,7 @@ mod tests {
                     TokenKind::Keyword(Keyword::Collection(Collection::Set)),
                     "set",
                 ),
+                (TokenKind::Keyword(Keyword::Let), "let"),
                 (TokenKind::Eof, ""),
             ],
         );

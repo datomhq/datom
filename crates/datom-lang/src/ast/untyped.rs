@@ -63,6 +63,9 @@ pub(crate) enum UntypedExpr {
         operator: UnaryOp,
         right: Box<Self>,
     },
+    Variable {
+        location: SrcSpan,
+    },
 }
 
 impl UntypedExpr {
@@ -72,7 +75,8 @@ impl UntypedExpr {
             | UntypedExpr::String { location, .. }
             | UntypedExpr::Bool { location, .. }
             | UntypedExpr::BinOp { location, .. }
-            | UntypedExpr::UnaryOp { location, .. } => location,
+            | UntypedExpr::UnaryOp { location, .. }
+            | UntypedExpr::Variable { location } => location,
         }
     }
 }
